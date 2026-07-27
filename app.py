@@ -11,7 +11,7 @@ from modulos.telas_equipe import renderizar_tela_troca_senha, renderizar_gerenci
 from modulos.totem import renderizar_totem  
 from modulos.eventos_grandes import renderizar_gestao_eventos  
 from modulos.gestao_interna import renderizar_gestao_interna  
-from modulos.dashboard import renderizar_dashboard_geral      
+from modulos.dashboard import renderizar_dashboard_geral        
 from modulos.leads import renderizar_modulo_leads
 
 # Garante que o banco de dados e as tabelas principais existam ao iniciar
@@ -98,7 +98,7 @@ if not st.session_state.logado:
 # --- FLUXO DE TELA 2: PRIMEIRO ACESSO OBRIGATÓRIO (TROCA DE SENHA) ---
 # =======================================================================
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
-    conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+    conn = sqlite3.connect('database/financeiro_vp.db')
     cursor = conn.cursor()
     cursor.execute("SELECT primeiro_login FROM usuarios WHERE email = ?", (st.session_state.email_usuario,))
     status_atual = cursor.fetchone()[0]
