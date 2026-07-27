@@ -5,7 +5,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 from datetime import datetime, timedelta
 from pypdf import PdfReader
-from google import genai  # Novo import oficial do SDK unificado da Google
+import google.generativeai as genai  # Novo import oficial do SDK unificado da Google
 import json
 import os
 
