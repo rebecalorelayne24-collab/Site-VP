@@ -1,21 +1,18 @@
 import sqlite3
 import os
 
+# Caminho centralizado do banco de dados
+DB_PATH = 'database/financeiro_v2.db'
+
 def inicializar_banco_dados():
     # Garante que a pasta 'database' exista
     if not os.path.exists('database'):
         os.makedirs('database')
         
-    caminho_db = 'database/financeiro_farmaciajr.db'
-    conn = sqlite3.connect(caminho_db)
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # 1. Tabela de Usuários (Recria se não tiver a coluna senha)
-    try:
-        cursor.execute("SELECT senha FROM usuarios LIMIT 1")
-    except sqlite3.OperationalError:
-        cursor.execute("DROP TABLE IF EXISTS usuarios")
-
+    # 1. Tabela de Usuários Completa
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +25,7 @@ def inicializar_banco_dados():
         )
     ''')
     
-    # 2. Tabela de Fluxo de Caixa Geral
+    # 2. Tabela do Fluxo de Caixa Geral
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +72,7 @@ def inicializar_banco_dados():
         )
     ''')
     
-    # Inserção do usuário administrador
+    # Inserção direta dos usuários administradores
     usuarios_iniciais = [
         ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 0, 'Ativo'),
         ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 0, 'Ativo')
