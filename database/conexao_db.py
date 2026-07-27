@@ -2,20 +2,30 @@ import sqlite3
 import os
 
 def inicializar_banco_dados():
-    # Garante que a pasta 'database' exista no ambiente
+    caminho_db = 'database/financeiro_farmaciajr.db'
+    
+    # Garante que a pasta 'database' exista
     if not os.path.exists('database'):
         os.makedirs('database')
         
-    conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+    # Se o banco antigo existir, verifica se a coluna 'senha' está presente
+    # Caso a coluna não exista (banco antigo desatualizado), remove o arquivo para recriar do zero
+    if os.path.exists(caminho_db):
+        try:
+            conn_test = sqlite3.connect(caminho_db)
+            cursor_test = conn_test.cursor()
+            cursor_test.execute("SELECT senha, departamento FROM usuarios LIMIT 1")
+            conn_test.close()
+        except sqlite3.OperationalError:
+            if 'conn_test' in locals():
+                conn_test.close()
+            os.remove(caminho_db)  # Deleta o arquivo antigo incompatível
+
+    # Conecta e cria o banco novo atualizado
+    conn = sqlite3.connect(caminho_db)
     cursor = conn.cursor()
     
-    # Remove a tabela antiga incompativel (caso ela nao tenha a coluna senha)
-    # e cria a nova tabela com a estrutura correta
-    try:
-        cursor.execute("SELECT senha FROM usuarios LIMIT 1")
-    except sqlite3.OperationalError:
-        cursor.execute("DROP TABLE IF EXISTS usuarios")
-
+    # 1. Criar Tabela de Usuários Atualizada
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +38,7 @@ def inicializar_banco_dados():
         )
     ''')
     
-    # Inserir/Atualizar os acessos das Diretorias Executivas
+    # 2. Cadastrar Diretorias Executivas com primeiro_login = 0 (Acesso direto)
     usuarios_iniciais = [
         ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 0, 'Ativo'),
         ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 0, 'Ativo')
