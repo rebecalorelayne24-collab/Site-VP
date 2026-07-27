@@ -6,3 +6,6 @@ requests
 xlsxwriter
 reportlab
 plotly
+python-docx
+openpyxl
+weasyprint
