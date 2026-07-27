@@ -18,7 +18,14 @@ def inicializar_banco_dados():
             status TEXT
         )
     ''')
-    
+
+    # Insere o seu e-mail garantindo acesso de Vice-Presidência/Admin
+cursor.execute("""
+    INSERT OR REPLACE INTO usuarios (email, nome, cargo, status)
+    VALUES ('vice-presidencia@farmaciajr.com', 'Administrador', 'Vice-Presidência', 'Ativo')
+""")
+conn.commit()
+
     # NOVA TABELA: Controle de Empréstimos e Devoluções de Jalecos
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS emprestimos_jaleco (
