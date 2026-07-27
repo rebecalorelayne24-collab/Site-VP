@@ -9,3 +9,4 @@ plotly
 python-docx
 openpyxl
 weasyprint
+google-genai
