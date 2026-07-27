@@ -2,7 +2,6 @@ import sqlite3
 import os
 
 def inicializar_banco_dados():
-    # Garante que a pasta 'database' exista
     if not os.path.exists('database'):
         os.makedirs('database')
         
@@ -10,7 +9,7 @@ def inicializar_banco_dados():
     conn = sqlite3.connect(caminho_db)
     cursor = conn.cursor()
     
-    # 1. Tabela de Usuários
+    # Tabela de Usuários
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,7 +22,7 @@ def inicializar_banco_dados():
         )
     ''')
     
-    # 2. Tabela do Fluxo de Caixa Geral
+    # Tabela do Fluxo de Caixa Geral
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +44,7 @@ def inicializar_banco_dados():
         )
     ''')
 
-    # 3. Tabela de Eventos
+    # Tabela de Eventos
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS eventos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +56,7 @@ def inicializar_banco_dados():
         )
     ''')
 
-    # 4. Tabela de Leads
+    # Tabela de Leads
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS leads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
