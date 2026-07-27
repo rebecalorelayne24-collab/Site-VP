@@ -4,22 +4,26 @@ def inicializar_banco_dados():
     conn = sqlite3.connect('banco_financeiro.db')
     cursor = conn.cursor()
     
-    # Cria a tabela garantindo as colunas de email e senha
+    # 1. Cria a tabela de usuarios se nao existir
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
-            senha TEXT NOT NULL,
             nome TEXT,
             cargo TEXT,
             status TEXT DEFAULT 'Ativo'
         )
     ''')
     
-    # Cadastra o usuário admin com a senha '123456'
+    # 2. Insere os e-mails autorizados para liberacao de acesso
     cursor.execute('''
-        INSERT OR REPLACE INTO usuarios (email, senha, nome, cargo, status)
-        VALUES ('admin@farmaciajr.com', '123456', 'Administrador', 'Vice-Presidência', 'Ativo')
+        INSERT OR IGNORE INTO usuarios (email, nome, cargo, status)
+        VALUES ('admin@farmaciajr.com', 'Administrador', 'Vice-Presidência', 'Ativo')
+    ''')
+    
+    cursor.execute('''
+        INSERT OR IGNORE INTO usuarios (email, nome, cargo, status)
+        VALUES ('vicepresidencia@farmaciajr.com', 'Vice Presidência', 'Vice-Presidência', 'Ativo')
     ''')
     
     conn.commit()
