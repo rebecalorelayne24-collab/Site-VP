@@ -6,11 +6,16 @@ def inicializar_banco_dados():
     if not os.path.exists('database'):
         os.makedirs('database')
         
-    # Conecta ao arquivo do banco de dados exato esperado pelo app.py
     conn = sqlite3.connect('database/financeiro_farmaciajr.db')
     cursor = conn.cursor()
     
-    # 1. Criar Tabela de Usuários com todas as colunas necessárias
+    # Remove a tabela antiga incompativel (caso ela nao tenha a coluna senha)
+    # e cria a nova tabela com a estrutura correta
+    try:
+        cursor.execute("SELECT senha FROM usuarios LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute("DROP TABLE IF EXISTS usuarios")
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,8 +28,7 @@ def inicializar_banco_dados():
         )
     ''')
     
-    # 2. Inserir ou atualizar os acessos das Diretorias Executivas
-    # (Define primeiro_login = 0 para pular a tela de troca de senha e ir direto ao painel)
+    # Inserir/Atualizar os acessos das Diretorias Executivas
     usuarios_iniciais = [
         ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 0, 'Ativo'),
         ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 0, 'Ativo')
