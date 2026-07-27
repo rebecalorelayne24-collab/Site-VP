@@ -1,31 +1,41 @@
 import sqlite3
+import os
 
 def inicializar_banco_dados():
-    conn = sqlite3.connect('banco_financeiro.db')
+    # Garante que a pasta 'database' exista no ambiente
+    if not os.path.exists('database'):
+        os.makedirs('database')
+        
+    # Conecta ao arquivo do banco de dados exato esperado pelo app.py
+    conn = sqlite3.connect('database/financeiro_farmaciajr.db')
     cursor = conn.cursor()
     
-    # 1. Cria a tabela de usuarios se nao existir
+    # 1. Criar Tabela de Usuários com todas as colunas necessárias
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
-            nome TEXT,
-            cargo TEXT,
+            senha TEXT NOT NULL,
+            nome TEXT NOT NULL,
+            departamento TEXT DEFAULT 'Geral',
+            primeiro_login INTEGER DEFAULT 0,
             status TEXT DEFAULT 'Ativo'
         )
     ''')
     
-    # 2. Insere os e-mails autorizados para liberacao de acesso
-    cursor.execute('''
-        INSERT OR IGNORE INTO usuarios (email, nome, cargo, status)
-        VALUES ('admin@farmaciajr.com', 'Administrador', 'Vice-Presidência', 'Ativo')
-    ''')
+    # 2. Inserir ou atualizar os acessos das Diretorias Executivas
+    # (Define primeiro_login = 0 para pular a tela de troca de senha e ir direto ao painel)
+    usuarios_iniciais = [
+        ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 0, 'Ativo'),
+        ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 0, 'Ativo')
+    ]
     
-    cursor.execute('''
-        INSERT OR IGNORE INTO usuarios (email, nome, cargo, status)
-        VALUES ('vicepresidencia@farmaciajr.com', 'Vice Presidência', 'Vice-Presidência', 'Ativo')
-    ''')
-    
+    for email, senha, nome, departamento, primeiro_login, status in usuarios_iniciais:
+        cursor.execute('''
+            INSERT OR REPLACE INTO usuarios (email, senha, nome, departamento, primeiro_login, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (email.strip().lower(), senha, nome, departamento, primeiro_login, status))
+        
     conn.commit()
     conn.close()
 
