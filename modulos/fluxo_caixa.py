@@ -132,7 +132,7 @@ def ler_extrato_com_gemini(texto_pdf):
             resposta_texto = response.text.strip()
         except Exception:
             # Fallback caso a versão da lib não suporte o parâmetro de mime_type
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            model = genai.GenerativeModel("gemini-2.5-flash")
             response = model.generate_content(prompt)
             resposta_texto = response.text.strip()
 
