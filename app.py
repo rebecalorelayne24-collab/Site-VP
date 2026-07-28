@@ -4,12 +4,13 @@ from datetime import datetime
 import streamlit as st
 import google.generativeai as genai
 
-# --- CONFIGURAÇÃO DA IA ---
+# --- CONFIGURAÇÃO SEGURA DA API DO GEMINI ---
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 if api_key:
+    os.environ["GEMINI_API_KEY"] = api_key
     genai.configure(api_key=api_key)
 
-# --- IMPORTAÇÕES MÓDULOS INTERNOS ---
+# --- IMPORTAÇÕES DOS MÓDULOS INTERNOS ---
 from database.conexao_db import inicializar_banco_dados
 from modulos.dashboard import renderizar_dashboard_geral
 from modulos.equipe import verificar_credenciais
@@ -24,6 +25,7 @@ from modulos.telas_equipe import (
 )
 from modulos.totem import renderizar_totem
 
+# Garante a inicialização do banco de dados unificado
 inicializar_banco_dados()
 
 st.set_page_config(
@@ -33,25 +35,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- VISUAL NOVO: ROSA PASTEL SOFT + TEXTOS BRANCOS NA SIDEBAR + INPUTS LIMPISSIMOS ---
+# --- DESIGN SYSTEM: ROSA PASTEL SOFT + BARRA LATERAL ROSA COM TEXTO BRANCO ---
 st.markdown(
     """
     <style>
-        /* Fundo geral da página claro e repousante */
+        /* 1. FUNDO DA PÁGINA CLARO E REPOUSANTE */
         html, body, [data-testid="stAppViewContainer"] {
             background-color: #FFF5F7 !important;
             color: #2D2D2D !important;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
         }
 
-        /* Barra Lateral: Rosa Soft Vibrante com Texto Branco */
+        /* 2. BARRA LATERAL (SIDEBAR): ROSA VIBRANTE E ELEGANTE */
         [data-testid="stSidebar"] {
             background: linear-gradient(180deg, #E75480 0%, #C71585 100%) !important;
             border-right: none !important;
             box-shadow: 3px 0 10px rgba(0,0,0,0.05);
         }
 
-        /* Textos e Rótulos da Sidebar em Branco Puro */
+        /* Textos e Rótulos da Sidebar em BRANCO PURO */
         [data-testid="stSidebar"] *, 
         [data-testid="stSidebar"] label, 
         [data-testid="stSidebar"] span,
@@ -60,19 +62,25 @@ st.markdown(
             font-weight: 500 !important;
         }
 
-        /* Itens de Navegação (Menu) */
+        /* Itens de Navegação do Menu */
         [data-testid="stSidebar"] div[role="radiogroup"] > label {
-            background-color: rgba(255, 255, 255, 0.12) !important;
+            background-color: rgba(255, 255, 255, 0.15) !important;
             padding: 10px 14px !important;
             border-radius: 10px !important;
             margin-bottom: 6px !important;
             border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            transition: all 0.2s ease-in-out !important;
         }
 
-        /* Item Selecionado no Menu */
+        [data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
+            background-color: rgba(255, 255, 255, 0.25) !important;
+        }
+
+        /* Item Selecionado no Menu (Destaque em Branco) */
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
             background-color: #FFFFFF !important;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
+            border: none !important;
         }
 
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] span {
@@ -80,7 +88,7 @@ st.markdown(
             font-weight: bold !important;
         }
 
-        /* Caixas de Texto / Login: Fundo Branco Limpo */
+        /* 3. CAIXAS DE ENTRADA (INPUTS DE LOGIN COM FUNDO BRANCO LIMPO) */
         div[data-baseweb="input"] {
             background-color: #FFFFFF !important;
             border-radius: 10px !important;
@@ -88,7 +96,7 @@ st.markdown(
 
         div[data-baseweb="input"] > div {
             background-color: #FFFFFF !important;
-            border: 1.5px solid #FFC0CB !important;
+            border: 1.5px solid #FFB6C1 !important;
             border-radius: 10px !important;
         }
 
@@ -98,7 +106,12 @@ st.markdown(
             -webkit-text-fill-color: #333333 !important;
         }
 
-        /* Botões Principais em Rosa Pastel Destacado */
+        div[data-baseweb="input"] > div:focus-within {
+            border-color: #E75480 !important;
+            box-shadow: 0 0 0 3px rgba(231, 84, 128, 0.2) !important;
+        }
+
+        /* 4. BOTÕES PRINCIPAIS */
         div.stButton > button {
             background: linear-gradient(90deg, #FF69B4 0%, #E75480 100%) !important;
             color: #FFFFFF !important;
@@ -114,16 +127,27 @@ st.markdown(
             background: linear-gradient(90deg, #E75480 0%, #C71585 100%) !important;
         }
 
-        /* Títulos */
+        /* 5. TÍTULOS */
         h1, h2, h3 {
             color: #C71585 !important;
             font-weight: 700 !important;
+        }
+
+        /* Abas Superiores (Tabs) */
+        button[data-baseweb="tab"] {
+            color: #555555 !important;
+            font-weight: 600 !important;
+        }
+        button[aria-selected="true"] {
+            color: #E75480 !important;
+            border-bottom-color: #E75480 !important;
         }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
+# Inicialização das Variáveis de Sessão
 if "logado" not in st.session_state:
     st.session_state.logado = False
 if "email_usuario" not in st.session_state:
@@ -135,7 +159,9 @@ if "primeiro_login" not in st.session_state:
 if "departamento_usuario" not in st.session_state:
     st.session_state.departamento_usuario = "Geral"
 
-# --- TELA 1: LOGIN ---
+# =======================================================================
+# --- TELA 1: LOGIN AMIGÁVEL ---
+# =======================================================================
 if not st.session_state.logado:
     col1, col2, col3 = st.columns([1, 2, 1])
 
@@ -178,9 +204,11 @@ if not st.session_state.logado:
                 else:
                     st.error(checagem["mensagem"])
             else:
-                st.error("Por favor, preencha o e-mail e a senha.")
+                st.error("Por favor, preencha o e-mail e a senha para entrar.")
 
-# --- TELA 2: TROCA DE SENHA ---
+# =======================================================================
+# --- TELA 2: TROCA DE SENHA (PRIMEIRO ACESSO) ---
+# =======================================================================
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
     conn = sqlite3.connect("database/financeiro_v2.db")
     cursor = conn.cursor()
@@ -199,7 +227,9 @@ elif st.session_state.logado and st.session_state.primeiro_login == 1:
         st.session_state.primeiro_login = 0
         st.rerun()
 
-# --- TELA 3: HOME PRINCIPAL ---
+# =======================================================================
+# --- TELA 3: PAINEL PRINCIPAL ---
+# =======================================================================
 else:
     st.sidebar.markdown(
         "<h2 style='color: #FFFFFF !important; margin-bottom: 0px;'>🦩 Setor VP</h2>",
