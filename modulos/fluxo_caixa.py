@@ -89,11 +89,10 @@ def salvar_lancamento(
 
 
 def ler_extrato_com_gemini(texto_pdf):
-    """Realiza a leitura do extrato em texto usando a API Gemini com autenticação direta via chave."""
-    # Busca e limpa a chave de possíveis aspas ou espaços acidentais
+    """Realiza a leitura do extrato usando estritamente o modelo gemini-2.5-flash."""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if api_key:
-        api_key = api_key.strip().strip('"').strip("'")
+        api_key = str(api_key).strip().strip('"').strip("'")
 
     if not api_key:
         st.error("⚠️ Chave GEMINI_API_KEY não encontrada nos Secrets do Streamlit Cloud.")
@@ -104,7 +103,6 @@ def ler_extrato_com_gemini(texto_pdf):
         return []
 
     try:
-        # Configuração da API do Gemini
         genai.configure(api_key=api_key)
 
         prompt = f"""
@@ -127,27 +125,17 @@ def ler_extrato_com_gemini(texto_pdf):
         {texto_pdf}
         """
 
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # Modelo fixado diretamente no gemini-2.5-flash
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        res = model.generate_content(prompt)
 
-        resposta_texto = None
-        ultimo_erro = None
-
-        for m in modelos_validos:
-            try:
-                # Passa a chave de forma explícita para o modelo
-                model = genai.GenerativeModel(m)
-                res = model.generate_content(prompt)
-                if res and res.text:
-                    resposta_texto = res.text.strip()
-                    break
-            except Exception as err:
-                ultimo_erro = err
-                continue
-
-        if not resposta_texto:
-            st.error(f"⚠️ Erro no processamento da IA: {ultimo_erro}")
+        if not res or not res.text:
+            st.error("⚠️ Não foi possível obter resposta da IA.")
             return []
 
+        resposta_texto = res.text.strip()
+
+        # Limpeza caso o modelo retorne marcadores de bloco markdown ```json
         if "```" in resposta_texto:
             partes = resposta_texto.split("```")
             for parte in partes:
