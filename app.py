@@ -19,32 +19,49 @@ inicializar_banco_dados()
 
 st.set_page_config(page_title="Plataforma VP — Farmácia Jr.", page_icon="🦩", layout="wide")
 
-# --- CUSTOMIZAÇÃO VISUAL: IDENTIDADE DA VP (ROSA PASTEL & FLAMINGOS) ---
+# --- CUSTOMIZAÇÃO VISUAL: IDENTIDADE DA VP COM CONTRASTE PERFEITO ---
 st.markdown("""
     <style>
-        /* Cor de fundo do menu lateral (Rosa pastel) */
-        [data-testid="stSidebar"] {
-            background-color: #FFF0F5;
+        /* Define o fundo de toda a aplicação como claro/branco */
+        .stApp {
+            background-color: #FAFAFA !important;
+            color: #333333 !important;
         }
+
+        /* Menu lateral (Sidebar): Tom rosa vibrante elegante para dar leitura perfeita */
+        [data-testid="stSidebar"] {
+            background-color: #FFF0F5 !important;
+            border-right: 2px solid #FFB6C1 !important;
+        }
+
+        /* Força a cor dos textos e labels do menu lateral para escuro/legível */
+        [data-testid="stSidebar"] *, [data-testid="stSidebar"] label, [data-testid="stSidebar"] span {
+            color: #4A154B !important;
+            font-weight: 600 !important;
+        }
+
         /* Cor dos botões principais */
         div.stButton > button:first-child {
-            background-color: #FF69B4;
-            color: white;
-            border-radius: 8px;
-            border: none;
+            background-color: #FF69B4 !important;
+            color: white !important;
+            border-radius: 8px !important;
+            border: none !important;
+            font-weight: bold !important;
         }
         div.stButton > button:first-child:hover {
-            background-color: #FF1493;
-            color: white;
+            background-color: #FF1493 !important;
+            color: white !important;
         }
-        /* Cor dos links e destaques */
-        a, .st-emotion-cache-10trblm {
-            color: #FF69B4 !important;
+
+        /* Customização dos links e títulos */
+        h1, h2, h3, h4 {
+            color: #C71585 !important;
         }
+
         /* Customização das abas superiores (Tabs) */
         button[data-baseweb="tab"] {
-            color: #666;
-            font-weight: bold;
+            color: #555555 !important;
+            font-weight: bold !important;
         }
         button[aria-selected="true"] {
             color: #FF1493 !important;
@@ -98,7 +115,7 @@ if not st.session_state.logado:
 # --- FLUXO DE TELA 2: PRIMEIRO ACESSO OBRIGATÓRIO (TROCA DE SENHA) ---
 # =======================================================================
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
-    conn = sqlite3.connect('database/financeiro_vp.db')
+    conn = sqlite3.connect('database/financeiro_v2.db')
     cursor = conn.cursor()
     cursor.execute("SELECT primeiro_login FROM usuarios WHERE email = ?", (st.session_state.email_usuario,))
     status_atual = cursor.fetchone()[0]
@@ -147,7 +164,6 @@ else:
         st.rerun()
 
     # --- CONTROLADOR ESTRUTURADO DE EXIBIÇÃO DE PÁGINAS ---
-    # Garante de forma absoluta que apenas a tela selecionada no menu será executada
     if menu == "Dashboard Geral":
         renderizar_dashboard_geral()
         
