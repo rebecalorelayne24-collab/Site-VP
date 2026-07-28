@@ -1,7 +1,6 @@
 import os
 import sqlite3
 import streamlit as st
-import google.generativeai as genai
 
 # 1. Configuração da página (deve ser o primeiro comando Streamlit)
 st.set_page_config(
@@ -11,22 +10,30 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 2. Configuração do Gemini em cache de recurso (inicializa 1x apenas)
+# 2. Configuração do Gemini em cache de recurso (import + init só se houver key)
 @st.cache_resource
 def setup_gemini():
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-    if api_key:
-        os.environ["GEMINI_API_KEY"] = api_key
-        genai.configure(api_key=api_key)
-        return True
-    return False
+    if not api_key:
+        return False
+    import google.generativeai as genai  # import pesado só roda se a key existir
+    os.environ["GEMINI_API_KEY"] = api_key
+    genai.configure(api_key=api_key)
+    return True
 
 setup_gemini()
+
+# 2b. Conexão SQLite reutilizável (evita abrir/fechar conexão a cada rerun)
+@st.cache_resource
+def get_connection():
+    return sqlite3.connect("database/financeiro_v2.db", check_same_thread=False)
 
 # 3. CSS Otimizado e Cacheado na Memória
 @st.cache_data
 def aplicar_estilo_ui():
     return """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <style>
         html, body, [data-testid="stAppViewContainer"] {
             background-color: #FFF5F7 !important;
@@ -101,7 +108,7 @@ if "departamento_usuario" not in st.session_state:
 if not st.session_state.logado:
     from database.conexao_db import inicializar_banco_dados
     from modulos.equipe import verificar_credenciais
-    
+
     inicializar_banco_dados()
 
     _, col2, _ = st.columns([1, 2, 1])
@@ -134,13 +141,13 @@ if not st.session_state.logado:
 
 # =======================================================================
 # FLUXO DE TELA 2: TROCA DE SENHA
+# (usa a conexão cacheada em vez de abrir uma nova a cada rerun)
 # =======================================================================
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
-    conn = sqlite3.connect("database/financeiro_v2.db")
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT primeiro_login FROM usuarios WHERE email = ?", (st.session_state.email_usuario,))
     resultado = cursor.fetchone()
-    conn.close()
 
     if resultado and resultado[0] == 1:
         from modulos.telas_equipe import renderizar_tela_troca_senha
@@ -187,31 +194,31 @@ else:
     if menu == "Dashboard Geral":
         from modulos.dashboard import renderizar_dashboard_geral
         renderizar_dashboard_geral()
-        
+
     elif menu == "Calculadora de Precificação":
         from modulos.precificacao import renderizar_aba_precificacao
         renderizar_aba_precificacao()
-        
+
     elif menu == "Fluxo de Caixa":
         from modulos.fluxo_caixa import renderizar_aba_fluxo_caixa
         renderizar_aba_fluxo_caixa()
-        
+
     elif menu == "Gerenciar Equipe":
         from modulos.telas_equipe import renderizar_gerenciamento_equipe
         renderizar_gerenciamento_equipe(st.session_state.email_usuario)
-        
+
     elif menu == "Planejamento de Eventos":
         from modulos.eventos_grandes import renderizar_gestao_eventos
         renderizar_gestao_eventos()
-        
+
     elif menu == "Contratos e Demandas Internas":
         from modulos.gestao_interna import renderizar_gestao_interna
         renderizar_gestao_interna()
-        
+
     elif menu == "Pipeline de Leads":
         from modulos.leads import renderizar_modulo_leads
         renderizar_modulo_leads()
-        
+
     elif menu == "Totem de Vendas Express":
         from modulos.totem import renderizar_totem
         renderizar_totem()
