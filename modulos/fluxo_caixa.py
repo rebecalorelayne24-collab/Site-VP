@@ -13,12 +13,14 @@ DB_PATH = "database/financeiro_v2.db"
 
 
 def garantir_colunas_documentacao():
-    """Garante a existência da tabela fluxo_caixa_geral no banco de dados."""
+    """Garante a existência da tabela e adiciona colunas faltantes dinamicamente."""
     if not os.path.exists("database"):
         os.makedirs("database")
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+
+    # Cria a tabela se não existir
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,6 +39,34 @@ def garantir_colunas_documentacao():
             status_onvio TEXT
         )
     """)
+
+    # Verifica se todas as colunas necessárias existem no banco atual
+    cursor.execute("PRAGMA table_info(fluxo_caixa_geral)")
+    colunas_existentes = [coluna[1] for coluna in cursor.fetchall()]
+
+    colunas_necessarias = {
+        "mes": "TEXT",
+        "data": "TEXT",
+        "departamento": "TEXT",
+        "tipo": "TEXT",
+        "categoria": "TEXT",
+        "descricao": "TEXT",
+        "valor_bruto": "REAL",
+        "taxa": "REAL",
+        "valor_liquido": "REAL",
+        "conta_origem": "TEXT",
+        "status_pagamento": "TEXT",
+        "nota_fiscal": "TEXT",
+        "status_onvio": "TEXT",
+    }
+
+    # Adiciona colunas ausentes para evitar sqlite3.OperationalError
+    for coluna, tipo_dado in colunas_necessarias.items():
+        if coluna not in colunas_existentes:
+            cursor.execute(
+                f"ALTER TABLE fluxo_caixa_geral ADD COLUMN {coluna} {tipo_dado}"
+            )
+
     conn.commit()
     conn.close()
 
@@ -126,7 +156,6 @@ def ler_extrato_com_gemini(texto_pdf):
         {texto_pdf}
         """
 
-        # Modelos ativos (inclui o alias automático 'gemini-flash-latest')
         modelos_fila = [
             "gemini-flash-latest",
             "gemini-3.6-flash",
@@ -159,7 +188,6 @@ def ler_extrato_com_gemini(texto_pdf):
                 st.error(f"⚠️ Erro ao comunicar com a IA: {ultimo_erro}")
             return []
 
-        # Limpeza de marcadores markdown
         if "```" in resposta_texto:
             partes = resposta_texto.split("```")
             for parte in partes:
@@ -203,8 +231,12 @@ def gerar_excel_estilizado(df_export):
     }
 
     df_formatado = df_export.copy()
-    cols_existentes = [c for c in colunas_renomeadas.keys() if c in df_formatado.columns]
-    df_formatado = df_formatado[cols_existentes].rename(columns=colunas_renomeadas)
+    cols_existentes = [
+        c for c in colunas_renomeadas.keys() if c in df_formatado.columns
+    ]
+    df_formatado = df_formatado[cols_existentes].rename(
+        columns=colunas_renomeadas
+    )
 
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         df_formatado.to_excel(writer, index=False, sheet_name="Fluxo_de_Caixa")
@@ -260,17 +292,26 @@ def gerar_excel_estilizado(df_export):
             for col_num, col_name in enumerate(df_formatado.columns):
                 val = df_formatado.iloc[row_num, col_num]
                 if "Valor" in col_name or "Taxa" in col_name:
-                    worksheet.write_number(row_num + 1, col_num, float(val or 0.0), fmt_moeda)
+                    worksheet.write_number(
+                        row_num + 1, col_num, float(val or 0.0), fmt_moeda
+                    )
                 elif "Data" in col_name:
                     worksheet.write(row_num + 1, col_num, str(val or ""), fmt_data)
                 else:
                     worksheet.write(row_num + 1, col_num, str(val or ""), fmt_celula)
 
         for col_num, col_name in enumerate(df_formatado.columns):
-            max_len = max(
-                (df_formatado[col_name].astype(str).map(len).max() if not df_formatado.empty else 0),
-                len(col_name),
-            ) + 4
+            max_len = (
+                max(
+                    (
+                        df_formatado[col_name].astype(str).map(len).max()
+                        if not df_formatado.empty
+                        else 0
+                    ),
+                    len(col_name),
+                )
+                + 4
+            )
             worksheet.set_column(col_num, col_num, min(max_len, 45))
 
         worksheet.freeze_panes(1, 0)
@@ -289,29 +330,56 @@ def renderizar_aba_fluxo_caixa():
     st.write("Gerencie os registros financeiros de forma manual ou por IA.")
 
     lista_meses = [
-        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+        "Janeiro",
+        "Fevereiro",
+        "Março",
+        "Abril",
+        "Maio",
+        "Junho",
+        "Julho",
+        "Agosto",
+        "Setembro",
+        "Outubro",
+        "Novembro",
+        "Dezembro",
     ]
 
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM fluxo_caixa_geral ORDER BY data DESC, id DESC", conn)
+    df = pd.read_sql_query(
+        "SELECT * FROM fluxo_caixa_geral ORDER BY data DESC, id DESC", conn
+    )
     conn.close()
 
-    aba_manual, aba_pdf = st.tabs(["➕ Registro Manual", "🤖 Importar por IA (PDF)"])
+    aba_manual, aba_pdf = st.tabs(
+        ["➕ Registro Manual", "🤖 Importar por IA (PDF)"]
+    )
 
     with aba_manual:
         with st.expander("Abrir Formulário de Operação Manual"):
             data = st.date_input("Data do Lançamento", value=datetime.now())
-            depto = st.selectbox("Departamento", ["VP", "IMAGEM", "AR", "PRESIDÊNCIA", "PROJETOS", "NEGÓCIOS"])
+            depto = st.selectbox(
+                "Departamento",
+                ["VP", "IMAGEM", "AR", "PRESIDÊNCIA", "PROJETOS", "NEGÓCIOS"],
+            )
             tipo = st.selectbox("Tipo", ["Receita", "Despesa"])
-            cat = st.selectbox("Categoria", ["Serviço Prestado", "ADM: Operacional", "Marketing", "Eventos"])
+            cat = st.selectbox(
+                "Categoria",
+                ["Serviço Prestado", "ADM: Operacional", "Marketing", "Eventos"],
+            )
             desc = st.text_input("Descrição")
             v_bruto = st.number_input("Valor Bruto (R$)", min_value=0.0)
             v_taxa = st.number_input("Taxas (R$)", min_value=0.0, value=0.0)
             v_liq = v_bruto - v_taxa
-            conta = st.selectbox("Conta de Origem", ["Banco do Brasil", "PicPay", "Caixa"])
-            pagamento = st.selectbox("Status do Pagamento", ["🟢 Pago", "🟡 Pendente"])
-            nf = st.selectbox("Nota Fiscal", ["🟢 Emitida", "🟡 Aguardando Emissão", "⚪ Não se aplica"])
+            conta = st.selectbox(
+                "Conta de Origem", ["Banco do Brasil", "PicPay", "Caixa"]
+            )
+            pagamento = st.selectbox(
+                "Status do Pagamento", ["🟢 Pago", "🟡 Pendente"]
+            )
+            nf = st.selectbox(
+                "Nota Fiscal",
+                ["🟢 Emitida", "🟡 Aguardando Emissão", "⚪ Não se aplica"],
+            )
             onvio = st.selectbox("Status na Onvio", ["❌ Não enviado", "Enviado"])
 
             if st.button("Confirmar Lançamento Manual"):
@@ -320,17 +388,35 @@ def renderizar_aba_fluxo_caixa():
                 else:
                     mes_nome = lista_meses[data.month - 1]
                     salvar_lancamento(
-                        mes_nome, data.strftime("%Y-%m-%d"), depto, tipo, cat,
-                        desc, v_bruto, v_taxa, v_liq, conta, pagamento, nf, onvio
+                        mes_nome,
+                        data.strftime("%Y-%m-%d"),
+                        depto,
+                        tipo,
+                        cat,
+                        desc,
+                        v_bruto,
+                        v_taxa,
+                        v_liq,
+                        conta,
+                        pagamento,
+                        nf,
+                        onvio,
                     )
                     st.success("Lançamento manual salvo!")
                     st.rerun()
 
     with aba_pdf:
         st.markdown("#### 🤖 Leitura Cognitiva de Extratos com Gemini")
-        st.caption("Faça o upload do PDF. O Gemini interpretará todas as transações de qualquer banco.")
+        st.caption(
+            "Faça o upload do PDF. O Gemini interpretará todas as transações"
+            " de qualquer banco."
+        )
 
-        arquivo_pdf = st.file_uploader("Escolha o arquivo do Extrato (.pdf)", type=["pdf"], key="uploader_ia_fluxo")
+        arquivo_pdf = st.file_uploader(
+            "Escolha o arquivo do Extrato (.pdf)",
+            type=["pdf"],
+            key="uploader_ia_fluxo",
+        )
         if arquivo_pdf is not None:
             with st.spinner("🤖 Extraindo texto do documento..."):
                 try:
@@ -349,7 +435,9 @@ def renderizar_aba_fluxo_caixa():
                     lancamentos_ia = ler_extrato_com_gemini(texto_bruto)
 
                 if lancamentos_ia:
-                    st.write(f"📋 **{len(lancamentos_ia)} lançamentos mapeados pela IA:**")
+                    st.write(
+                        f"📋 **{len(lancamentos_ia)} lançamentos mapeados pela IA:**"
+                    )
 
                     dados_finais = []
                     for item in lancamentos_ia:
@@ -364,7 +452,11 @@ def renderizar_aba_fluxo_caixa():
                             "data": item.get("data", datetime.now().strftime("%Y-%m-%d")),
                             "departamento": "GERAL",
                             "tipo": item.get("tipo", "Despesa"),
-                            "categoria": "ADM: Operacional" if item.get("tipo") == "Despesa" else "Serviço Prestado",
+                            "categoria": (
+                                "ADM: Operacional"
+                                if item.get("tipo") == "Despesa"
+                                else "Serviço Prestado"
+                            ),
                             "descricao": item.get("descricao", "Lançamento sem nome"),
                             "valor_bruto": float(item.get("valor_bruto", 0.0)),
                             "taxa": 0.0,
@@ -376,29 +468,50 @@ def renderizar_aba_fluxo_caixa():
                         })
 
                     df_previa = pd.DataFrame(dados_finais)
-                    st.dataframe(df_previa[["data", "tipo", "descricao", "valor_bruto"]], use_container_width=True)
+                    st.dataframe(
+                        df_previa[["data", "tipo", "descricao", "valor_bruto"]],
+                        use_container_width=True,
+                    )
 
-                    if st.button("📥 Aprovar e Injetar Transações da IA", type="primary"):
+                    if st.button(
+                        "📥 Aprovar e Injetar Transações da IA", type="primary"
+                    ):
                         for lancamento in dados_finais:
                             salvar_lancamento(
-                                lancamento["mes"], lancamento["data"], lancamento["departamento"],
-                                lancamento["tipo"], lancamento["categoria"], lancamento["descricao"],
-                                lancamento["valor_bruto"], lancamento["taxa"], lancamento["valor_liquido"],
-                                lancamento["conta_origem"], lancamento["status_pagamento"],
-                                lancamento["nota_fiscal"], lancamento["status_onvio"]
+                                lancamento["mes"],
+                                lancamento["data"],
+                                lancamento["departamento"],
+                                lancamento["tipo"],
+                                lancamento["categoria"],
+                                lancamento["descricao"],
+                                lancamento["valor_bruto"],
+                                lancamento["taxa"],
+                                lancamento["valor_liquido"],
+                                lancamento["conta_origem"],
+                                lancamento["status_pagamento"],
+                                lancamento["nota_fiscal"],
+                                lancamento["status_onvio"],
                             )
                         st.success("Extrato salvo no banco de dados!")
                         st.rerun()
                 else:
-                    st.warning("A IA não encontrou lançamentos válidos no texto do extrato.")
+                    st.warning(
+                        "A IA não encontrou lançamentos válidos no texto do extrato."
+                    )
             else:
                 st.error("Não foi possível extrair texto do PDF.")
 
     st.markdown("---")
 
     if not df.empty:
-        receitas_pagas = df[(df["tipo"] == "Receita") & (df["status_pagamento"].str.contains("Pago", na=False))]["valor_liquido"].sum()
-        despesas_pagas = df[(df["tipo"] == "Despesa") & (df["status_pagamento"].str.contains("Pago", na=False))]["valor_liquido"].sum()
+        receitas_pagas = df[
+            (df["tipo"] == "Receita")
+            & (df["status_pagamento"].str.contains("Pago", na=False))
+        ]["valor_liquido"].sum()
+        despesas_pagas = df[
+            (df["tipo"] == "Despesa")
+            & (df["status_pagamento"].str.contains("Pago", na=False))
+        ]["valor_liquido"].sum()
         saldo_real = receitas_pagas - despesas_pagas
         cor_saldo_txt = "#2E7D32" if saldo_real >= 0 else "#C62828"
 
@@ -425,8 +538,13 @@ def renderizar_aba_fluxo_caixa():
         st.markdown("### 🔍 Consultas e Exportação")
         c_f1, c_f2, c_f3 = st.columns(3)
         filtro_mes = c_f1.selectbox("Filtrar por Mês:", ["Todos"] + lista_meses)
-        filtro_depto = c_f2.selectbox("Filtrar por Diretoria:", ["Todas", "IMAGEM", "AR", "VP", "PRESIDÊNCIA", "PROJETOS", "NEGÓCIOS"])
-        filtro_status = c_f3.selectbox("Filtrar por Pagamento:", ["Todos", "🟢 Pago", "🟡 Pendente"])
+        filtro_depto = c_f2.selectbox(
+            "Filtrar por Diretoria:",
+            ["Todas", "IMAGEM", "AR", "VP", "PRESIDÊNCIA", "PROJETOS", "NEGÓCIOS"],
+        )
+        filtro_status = c_f3.selectbox(
+            "Filtrar por Pagamento:", ["Todos", "🟢 Pago", "🟡 Pendente"]
+        )
 
         df_filtrado = df.copy()
         if filtro_mes != "Todos":
@@ -435,19 +553,28 @@ def renderizar_aba_fluxo_caixa():
             df_filtrado = df_filtrado[df_filtrado["departamento"] == filtro_depto]
         if filtro_status != "Todos":
             status_busca = "Pendente" if "Pendente" in filtro_status else "Pago"
-            df_filtrado = df_filtrado[df_filtrado["status_pagamento"].str.contains(status_busca, na=False)]
+            df_filtrado = df_filtrado[
+                df_filtrado["status_pagamento"].str.contains(status_busca, na=False)
+            ]
 
         excel_estilizado_bytes = gerar_excel_estilizado(df_filtrado)
 
         st.download_button(
             label="📊 Baixar Relatório Consolidado em Excel (.xlsx)",
             data=excel_estilizado_bytes,
-            file_name=f"Planilha_Fluxo_Caixa_FarmaciaJr_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            file_name=(
+                "Planilha_Fluxo_Caixa_FarmaciaJr_"
+                f"{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+            ),
+            mime=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
             use_container_width=True,
         )
 
-        st.markdown(f"#### 📄 Lançamentos Encontrados ({len(df_filtrado)} registros)")
+        st.markdown(
+            f"#### 📄 Lançamentos Encontrados ({len(df_filtrado)} registros)"
+        )
         for idx, row in df_filtrado.iterrows():
             with st.container():
                 col_l1, col_l2, col_l3, col_l4 = st.columns([1, 4, 2, 1])
@@ -464,19 +591,31 @@ def renderizar_aba_fluxo_caixa():
                 )
 
                 col_l2.write(f"**{row['descricao']}**")
-                col_l2.caption(f"📁 Setor: {row['departamento']} | Categoria: {row['categoria']} | Conta: {row['conta_origem']}")
+                col_l2.caption(
+                    f"📁 Setor: {row['departamento']} | Categoria: {row['categoria']} |"
+                    f" Conta: {row['conta_origem']}"
+                )
 
                 col_l3.write(f"💸 **Líq:** R$ {row['valor_liquido']:.2f}")
-                col_l3.caption(f"Status: {row['status_pagamento']} | NF: {row['nota_fiscal']}")
+                col_l3.caption(
+                    f"Status: {row['status_pagamento']} | NF: {row['nota_fiscal']}"
+                )
 
-                if col_l4.button("🗑️", key=f"del_fluxo_{row['id']}", help="Excluir lançamento"):
+                if col_l4.button(
+                    "🗑️", key=f"del_fluxo_{row['id']}", help="Excluir lançamento"
+                ):
                     conn = sqlite3.connect(DB_PATH)
                     cursor = conn.cursor()
-                    cursor.execute("DELETE FROM fluxo_caixa_geral WHERE id = ?", (row["id"],))
+                    cursor.execute(
+                        "DELETE FROM fluxo_caixa_geral WHERE id = ?", (row["id"],)
+                    )
                     conn.commit()
                     conn.close()
                     st.success("Removido!")
                     st.rerun()
-            st.markdown("<hr style='margin: 4px 0; border: 0.5px solid #F8F8F8;'>", unsafe_allow_html=True)
+            st.markdown(
+                "<hr style='margin: 4px 0; border: 0.5px solid #F8F8F8;'>",
+                unsafe_allow_html=True,
+            )
     else:
         st.info("A tabela de fluxo de caixa está limpa no momento.")
