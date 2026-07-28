@@ -107,6 +107,21 @@ def inicializar_banco_eventos():
     conn.close()
 
 
+def obter_cor_evento(evento_nome):
+    """Retorna uma cor de destaque hex com base na marca do evento."""
+    ev_upper = evento_nome.upper()
+    if "DDA" in ev_upper:
+        return "#C71585", "#FDF2F8"  # Magenta Açaí
+    elif "SEFARM" in ev_upper:
+        return "#008080", "#F0FDF4"  # Verde Farmácia
+    elif "SIMCOM" in ev_upper:
+        return "#8A2BE2", "#FAF5FF"  # Roxo Cosméticos
+    elif "JOFARM" in ev_upper:
+        return "#1E90FF", "#EFF6FF"  # Azul Executivo
+    else:
+        return "#FF1493", "#FFF0F5"  # Rosa Institucional Padrão
+
+
 def gerar_excel_didatico(
     evento,
     ing_totais,
@@ -120,53 +135,199 @@ def gerar_excel_didatico(
     df_c,
     df_p,
 ):
-    """Gera o relatório em Excel do Evento com a mesma identidade e layout estilizado do Fluxo de Caixa."""
+    """Gera um relatório profissional completo no Excel com Capa, Dashboard, KPIs, Gráficos e Formatação em A4."""
     buffer = io.BytesIO()
 
-    is_dda = "DDA" in evento
-    label_vendas = (
-        "Vendas Totem (Balcão)" if is_dda else "Ingressos Vendidos (Sympla)"
-    )
-    label_bruto = (
-        "Faturamento Bruto Balcão" if is_dda else "Faturamento Bruto (Sympla)"
-    )
-    label_liq = (
-        "Faturamento Líquido (Sem Taxa)"
-        if is_dda
-        else "Faturamento Líquido (Sympla)"
-    )
+    cor_primaria, cor_fundo_suave = obter_cor_evento(evento)
+    receita_total = liquido + patrocinios
+    total_custos = custos_pagos + custos_orcados
+    roi = ((lucro / total_custos) * 100) if total_custos > 0 else 0.0
 
-    resumo_data = {
-        "Indicador Financeiro": [
-            label_vendas,
-            label_bruto,
-            label_liq,
-            "Aporte de Patrocínios",
-            "Receita Total Realizada",
-            "Custos Operacionais Pagos",
-            "Custos Orçados (Previsão)",
-            "LUCRO LÍQUIDO DO PROJETO",
-            "Ponto de Equilíbrio (Break-Even)",
-        ],
-        "Valor / Métrica": [
-            f"{ing_totais} un",
-            bruto,
-            liquido,
-            patrocinios,
-            liquido + patrocinios,
-            custos_pagos,
-            custos_orcados,
-            lucro,
-            break_even,
-        ],
-    }
-    df_resumo = pd.DataFrame(resumo_data)
+    # Parecer Automático
+    if lucro > 0:
+        parecer_texto = (
+            f"🟢 PROJETO SUPERAVITÁRIO: O evento apresentou desempenho excelente, gerando R$ {lucro:,.2f} de lucro líquido "
+            f"com margem de retorno (ROI) de {roi:.1f}%."
+        )
+    elif lucro == 0:
+        parecer_texto = "🟡 PONTO DE EQUILÍBRIO: O evento cobriu exatamente suas despesas operacionais, sem lucro ou prejuízo acumulado."
+    else:
+        parecer_texto = (
+            f"🔴 ATENÇÃO - DEFICITÁRIO: O evento registrou déficit de R$ {abs(lucro):,.2f}. Recomenda-se reforçar a captação de patrocínios "
+            f"ou rever os custos operacionais orçados."
+        )
 
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        # 1. ABA RESUMO EXECUTIVO
-        df_resumo.to_excel(writer, sheet_name="Resumo Executivo", index=False)
+        workbook = writer.book
 
-        # 2. ABA CUSTOS
+        # -------------------------------------------------------------
+        # 🎨 FORMATOS DE ESTILO
+        # -------------------------------------------------------------
+        fmt_capa_titulo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 18,
+            "font_color": "#FFFFFF", "fg_color": cor_primaria,
+            "align": "center", "valign": "vcenter",
+        })
+
+        fmt_capa_sub = workbook.add_format({
+            "italic": True, "font_name": "Arial", "font_size": 10,
+            "font_color": "#FFFFFF", "fg_color": cor_primaria,
+            "align": "center", "valign": "vcenter",
+        })
+
+        fmt_kpi_card_titulo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 9,
+            "font_color": "#555555", "fg_color": cor_fundo_suave,
+            "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": cor_primaria,
+        })
+
+        fmt_kpi_card_valor = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 14,
+            "font_color": cor_primaria, "fg_color": "#FFFFFF",
+            "num_format": "R$ #,##0.00", "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": cor_primaria,
+        })
+
+        fmt_kpi_lucro_positivo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 14,
+            "font_color": "#2E7D32", "fg_color": "#E8F5E9",
+            "num_format": "R$ #,##0.00", "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": "#2E7D32",
+        })
+
+        fmt_kpi_lucro_negativo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 14,
+            "font_color": "#C62828", "fg_color": "#FFEBEE",
+            "num_format": "R$ #,##0.00", "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": "#C62828",
+        })
+
+        fmt_secao_titulo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 11,
+            "font_color": cor_primaria, "bottom": 2, "bottom_color": cor_primaria,
+        })
+
+        fmt_tabela_cabecalho = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 10,
+            "font_color": "#FFFFFF", "fg_color": cor_primaria,
+            "align": "center", "valign": "vcenter", "border": 1, "border_color": "#D3D3D3",
+        })
+
+        fmt_celula = workbook.add_format({
+            "font_name": "Arial", "font_size": 9, "align": "left", "valign": "vcenter",
+            "border": 1, "border_color": "#E0E0E0",
+        })
+
+        fmt_celula_zebra = workbook.add_format({
+            "font_name": "Arial", "font_size": 9, "align": "left", "valign": "vcenter",
+            "border": 1, "border_color": "#E0E0E0", "bg_color": "#F9FAFB",
+        })
+
+        fmt_moeda = workbook.add_format({
+            "font_name": "Arial", "font_size": 9, "num_format": "R$ #,##0.00",
+            "align": "right", "valign": "vcenter", "border": 1, "border_color": "#E0E0E0",
+        })
+
+        fmt_moeda_zebra = workbook.add_format({
+            "font_name": "Arial", "font_size": 9, "num_format": "R$ #,##0.00",
+            "align": "right", "valign": "vcenter", "border": 1, "border_color": "#E0E0E0",
+            "bg_color": "#F9FAFB",
+        })
+
+        fmt_parecer = workbook.add_format({
+            "font_name": "Arial", "font_size": 9.5, "text_wrap": True,
+            "valign": "vcenter", "fg_color": "#F8FAFC", "border": 1, "border_color": "#CBD5E1",
+        })
+
+        fmt_rodape = workbook.add_format({
+            "font_name": "Arial", "font_size": 8.5, "italic": True,
+            "font_color": "#64748B", "align": "center", "valign": "vcenter",
+        })
+
+        # =============================================================
+        # 🟢 ABA 1: CAPA & DASHBOARD EXECUTIVO
+        # =============================================================
+        ws_dash = workbook.add_worksheet("📊 Dashboard Executivo")
+        ws_dash.hide_gridlines(2)
+        ws_dash.set_landscape()
+        ws_dash.set_paper(9)  # Papel A4
+
+        # Banner do Cabeçalho
+        ws_dash.merge_range("B2:H3", f"FARMÁCIA JR. — RELATÓRIO EXECUTIVO", fmt_capa_titulo)
+        ws_dash.merge_range("B4:H4", f"Projeto: {evento}  |  Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')}", fmt_capa_sub)
+
+        # Seção KPIs
+        ws_dash.write("B6", "📌 INDICADORES CHAVE DE DESEMPENHO (KPIs)", fmt_secao_titulo)
+
+        # Cards
+        kpis = [
+            ("Faturamento Bruto", bruto, fmt_kpi_card_valor, "B", "C"),
+            ("Receita Líquida + Patrocínios", receita_total, fmt_kpi_card_valor, "D", "E"),
+            ("Custos Operacionais Totais", total_custos, fmt_kpi_card_valor, "F", "G"),
+        ]
+
+        for titulo, valor, fmt_v, c1, c2 in kpis:
+            ws_dash.merge_range(f"{c1}7:{c2}7", titulo.upper(), fmt_kpi_card_titulo)
+            ws_dash.merge_range(f"{c1}8:{c2}8", valor, fmt_v)
+
+        # Card Especial de Lucro
+        ws_dash.merge_range("H7:H7", "LUCRO LÍQUIDO", fmt_kpi_card_titulo)
+        fmt_lucro_usa = fmt_kpi_lucro_positivo if lucro >= 0 else fmt_kpi_lucro_negativo
+        ws_dash.write("H8", lucro, fmt_lucro_usa)
+
+        # Quadro de Mapeamento Numérico do Gráfico
+        ws_dash.write("B11", "📊 COMPOSIÇÃO FINANCEIRA DO PROJETO", fmt_secao_titulo)
+
+        # Tabela oculta de suporte ao gráfico
+        ws_dash.write("B13", "Categoria", fmt_tabela_cabecalho)
+        ws_dash.write("C13", "Valor (R$)", fmt_tabela_cabecalho)
+
+        dados_grafico = [
+            ("Ingressos / Balcão", liquido),
+            ("Patrocínios", patrocinios),
+            ("Custos Pagos", custos_pagos),
+            ("Custos Orçados", custos_orcados),
+            ("Lucro Líquido", lucro if lucro > 0 else 0),
+        ]
+
+        for i, (rotulo, val) in enumerate(dados_grafico):
+            ws_dash.write(13 + i, 1, rotulo, fmt_celula)
+            ws_dash.write(13 + i, 2, val, fmt_moeda)
+
+        # Inserção do Gráfico Nativo do Excel
+        chart = workbook.add_chart({"type": "column"})
+        chart.add_series({
+            "name": "Valores R$",
+            "categories": "='📊 Dashboard Executivo'!$B$14:$B$18",
+            "values": "='📊 Dashboard Executivo'!$C$14:$C$18",
+            "fill": {"color": cor_primaria},
+            "data_labels": {"value": True, "num_format": "R$ #,##0"},
+        })
+        chart.set_title({"name": "Distribuição de Receitas e Custos (R$)"})
+        chart.set_legend({"none": True})
+        chart.set_size({"width": 460, "height": 220})
+        ws_dash.insert_chart("D11", chart)
+
+        # Parecer Automático da Diretoria
+        ws_dash.write("B20", "💬 PARECER DE DESEMPENHO FINANCEIRO", fmt_secao_titulo)
+        ws_dash.merge_range("B21:H22", parecer_texto, fmt_parecer)
+
+        # Resumo Estatístico Secundário
+        ws_dash.write("B24", f"• Ponto de Equilíbrio (Break-Even): {break_even}", fmt_celula)
+        ws_dash.write("E24", f"• Ingressos/Copos Vendidos: {ing_totais} un", fmt_celula)
+        ws_dash.write("G24", f"• Retorno s/ Investimento (ROI): {roi:.1f}%", fmt_celula)
+
+        # Rodapé Institucional
+        ws_dash.merge_range("B26:H26", "Farmácia Jr. UFMG — Gestão Financeira e Estratégica de Projetos", fmt_rodape)
+
+        # Adjusts
+        ws_dash.set_column("A:A", 3)
+        ws_dash.set_column("B:H", 18)
+
+        # =============================================================
+        # 🟡 ABA 2: DETALHAMENTO DE CUSTOS
+        # =============================================================
         df_c_export = df_c.copy()
         if not df_c_export.empty and "evento" in df_c_export.columns:
             df_c_export = df_c_export.drop(columns=["evento", "id"], errors="ignore")
@@ -174,10 +335,36 @@ def gerar_excel_didatico(
                 columns={"data": "Data", "item": "Insumo / Item", "valor": "Valor (R$)", "status": "Status"}
             )
         else:
-            df_c_export = pd.DataFrame([{"Aviso": "Nenhum custo registrado"}])
-        df_c_export.to_excel(writer, sheet_name="Detalhamento de Custos", index=False)
+            df_c_export = pd.DataFrame([{"Data": "-", "Insumo / Item": "Nenhum custo registrado", "Valor (R$)": 0.0, "Status": "-"}])
 
-        # 3. ABA PATROCÍNIOS
+        ws_custos = workbook.add_worksheet("💸 Custos Operacionais")
+        ws_custos.set_landscape()
+
+        # Cabeçalho
+        for col_num, value in enumerate(df_c_export.columns):
+            ws_custos.write(0, col_num, value, fmt_tabela_cabecalho)
+
+        for row_num in range(len(df_c_export)):
+            zebra = row_num % 2 == 1
+            f_txt = fmt_celula_zebra if zebra else fmt_celula
+            f_moeda = fmt_moeda_zebra if zebra else fmt_moeda
+
+            for col_num, col_name in enumerate(df_c_export.columns):
+                val = df_c_export.iloc[row_num, col_num]
+                if "Valor" in str(col_name):
+                    ws_custos.write_number(row_num + 1, col_num, float(val or 0.0), f_moeda)
+                else:
+                    ws_custos.write(row_num + 1, col_num, str(val if val is not None else ""), f_txt)
+
+        # Autoajuste
+        for col_num, col_name in enumerate(df_c_export.columns):
+            max_len = max((df_c_export[col_name].astype(str).map(len).max() if not df_c_export.empty else 0), len(col_name)) + 6
+            ws_custos.set_column(col_num, col_num, min(max_len, 45))
+        ws_custos.freeze_panes(1, 0)
+
+        # =============================================================
+        # 🔵 ABA 3: PATROCÍNIOS CAPTADOS
+        # =============================================================
         df_p_export = df_p.copy()
         if not df_p_export.empty and "evento" in df_p_export.columns:
             df_p_export = df_p_export.drop(columns=["evento", "id"], errors="ignore")
@@ -185,74 +372,30 @@ def gerar_excel_didatico(
                 columns={"data": "Data", "empresa": "Parceiro / Empresa", "valor": "Valor (R$)"}
             )
         else:
-            df_p_export = pd.DataFrame([{"Aviso": "Nenhum patrocínio registrado"}])
-        df_p_export.to_excel(writer, sheet_name="Patrocínios Captados", index=False)
+            df_p_export = pd.DataFrame([{"Data": "-", "Parceiro / Empresa": "Nenhum patrocínio registrado", "Valor (R$)": 0.0}])
 
-        workbook = writer.book
+        ws_pat = workbook.add_worksheet("🤝 Patrocínios")
+        ws_pat.set_landscape()
 
-        # Estilos padronizados (Iguaizinhos ao Fluxo de Caixa)
-        fmt_cabecalho = workbook.add_format({
-            "bold": True,
-            "text_wrap": True,
-            "valign": "vcenter",
-            "align": "center",
-            "fg_color": "#FF1493",
-            "font_color": "#FFFFFF",
-            "font_name": "Arial",
-            "font_size": 10,
-            "border": 1,
-            "border_color": "#D3D3D3",
-        })
+        for col_num, value in enumerate(df_p_export.columns):
+            ws_pat.write(0, col_num, value, fmt_tabela_cabecalho)
 
-        fmt_celula = workbook.add_format({
-            "font_name": "Arial",
-            "font_size": 9,
-            "align": "left",
-            "valign": "vcenter",
-            "border": 1,
-            "border_color": "#E0E0E0",
-        })
+        for row_num in range(len(df_p_export)):
+            zebra = row_num % 2 == 1
+            f_txt = fmt_celula_zebra if zebra else fmt_celula
+            f_moeda = fmt_moeda_zebra if zebra else fmt_moeda
 
-        fmt_moeda = workbook.add_format({
-            "font_name": "Arial",
-            "font_size": 9,
-            "num_format": "R$ #,##0.00",
-            "align": "right",
-            "valign": "vcenter",
-            "border": 1,
-            "border_color": "#E0E0E0",
-        })
+            for col_num, col_name in enumerate(df_p_export.columns):
+                val = df_p_export.iloc[row_num, col_num]
+                if "Valor" in str(col_name):
+                    ws_pat.write_number(row_num + 1, col_num, float(val or 0.0), f_moeda)
+                else:
+                    ws_pat.write(row_num + 1, col_num, str(val if val is not None else ""), f_txt)
 
-        # Estilizar cada aba criada
-        for sheet_name, df_aba in [
-            ("Resumo Executivo", df_resumo),
-            ("Detalhamento de Custos", df_c_export),
-            ("Patrocínios Captados", df_p_export),
-        ]:
-            worksheet = writer.sheets[sheet_name]
-
-            # Escrever Cabeçalho
-            for col_num, value in enumerate(df_aba.columns):
-                worksheet.write(0, col_num, value, fmt_cabecalho)
-
-            # Escrever Dados
-            for row_num in range(len(df_aba)):
-                for col_num, col_name in enumerate(df_aba.columns):
-                    val = df_aba.iloc[row_num, col_num]
-                    if isinstance(val, (int, float)) and ("Valor" in str(col_name) or sheet_name == "Resumo Executivo"):
-                        worksheet.write_number(row_num + 1, col_num, float(val), fmt_moeda)
-                    else:
-                        worksheet.write(row_num + 1, col_num, str(val if val is not None else ""), fmt_celula)
-
-            # Auto-ajuste de largura de colunas
-            for col_num, col_name in enumerate(df_aba.columns):
-                max_len = max(
-                    (df_aba[col_name].astype(str).map(len).max() if not df_aba.empty else 0),
-                    len(col_name),
-                ) + 5
-                worksheet.set_column(col_num, col_num, min(max_len, 45))
-
-            worksheet.freeze_panes(1, 0)
+        for col_num, col_name in enumerate(df_p_export.columns):
+            max_len = max((df_p_export[col_name].astype(str).map(len).max() if not df_p_export.empty else 0), len(col_name)) + 6
+            ws_pat.set_column(col_num, col_num, min(max_len, 45))
+        ws_pat.freeze_panes(1, 0)
 
     return buffer.getvalue()
 
@@ -529,9 +672,9 @@ def renderizar_gestao_eventos():
             )
 
             st.download_button(
-                label="📥 Exportar Dados para Planilha Oficial Executiva (.xlsx)",
+                label="📥 Exportar Relatório Executivo em Excel (.xlsx)",
                 data=dados_excel,
-                file_name=f"planejamento_{tag_evento.lower()}_{datetime.now().strftime('%Y')}.xlsx",
+                file_name=f"Relatorio_Executivo_{tag_evento.lower()}_{datetime.now().strftime('%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
