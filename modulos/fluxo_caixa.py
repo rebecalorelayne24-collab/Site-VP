@@ -9,6 +9,11 @@ import pandas as pd
 from pypdf import PdfReader
 import streamlit as st
 
+from modulos.estilo import (
+    INK, MIST, VERDANT, CORAL, SAGE, CLOUD, BORDER, SLATE,
+    injetar_estilos, page_header, section_header, metric_card, pill, formatar_moeda,
+)
+
 DB_PATH = "database/financeiro_v2.db"
 
 
@@ -209,7 +214,7 @@ def ler_extrato_com_gemini(texto_pdf):
 
 
 def gerar_excel_estilizado(df_export):
-    """Gera o arquivo Excel formatado para download."""
+    """Gera o arquivo Excel formatado para download, seguindo a identidade visual da plataforma."""
     buffer = io.BytesIO()
 
     colunas_renomeadas = {
@@ -236,69 +241,127 @@ def gerar_excel_estilizado(df_export):
     df_formatado = df_formatado[cols_existentes].rename(
         columns=colunas_renomeadas
     )
+    n_linhas = len(df_formatado)
+    n_cols = len(df_formatado.columns)
+    linha_titulo, linha_cabecalho = 0, 2
+    primeira_linha_dados = linha_cabecalho + 1
 
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        df_formatado.to_excel(writer, index=False, sheet_name="Fluxo_de_Caixa")
+        df_formatado.to_excel(
+            writer, index=False, sheet_name="Fluxo_de_Caixa", startrow=linha_cabecalho
+        )
 
         workbook = writer.book
         worksheet = writer.sheets["Fluxo_de_Caixa"]
 
+        # -------- Paleta alinhada ao sistema de design (INK/VERDANT/CORAL/SAGE) --------
+        cor_receita_bg, cor_receita_fg = "#E5F3EC", "#186B45"
+        cor_despesa_bg, cor_despesa_fg = "#FCEAE4", "#B94A2C"
+        cor_zebra = "#F4F9F7"
+
+        fmt_titulo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 14,
+            "font_color": INK, "valign": "vcenter",
+        })
+        fmt_subtitulo = workbook.add_format({
+            "font_name": "Arial", "font_size": 9, "font_color": "#5B7A72", "valign": "vcenter",
+        })
         fmt_cabecalho = workbook.add_format({
-            "bold": True,
-            "text_wrap": True,
-            "valign": "vcenter",
-            "align": "center",
-            "fg_color": "#FF1493",
-            "font_color": "#FFFFFF",
-            "font_name": "Arial",
-            "font_size": 10,
-            "border": 1,
-            "border_color": "#D3D3D3",
+            "bold": True, "text_wrap": True, "valign": "vcenter", "align": "center",
+            "fg_color": INK, "font_color": "#FFFFFF", "font_name": "Arial", "font_size": 10,
+            "border": 1, "border_color": INK,
         })
 
-        fmt_celula = workbook.add_format({
-            "font_name": "Arial",
-            "font_size": 9,
-            "align": "left",
-            "valign": "vcenter",
-            "border": 1,
-            "border_color": "#E0E0E0",
+        def _fmt_celula(zebra=False):
+            return workbook.add_format({
+                "font_name": "Arial", "font_size": 9, "align": "left", "valign": "vcenter",
+                "border": 1, "border_color": "#E0E0E0",
+                "bg_color": cor_zebra if zebra else "#FFFFFF",
+            })
+
+        def _fmt_moeda(zebra=False):
+            return workbook.add_format({
+                "font_name": "Arial", "font_size": 9, "num_format": "R$ #,##0.00;[RED]-R$ #,##0.00",
+                "align": "right", "valign": "vcenter",
+                "border": 1, "border_color": "#E0E0E0",
+                "bg_color": cor_zebra if zebra else "#FFFFFF",
+            })
+
+        def _fmt_data(zebra=False):
+            return workbook.add_format({
+                "font_name": "Arial", "font_size": 9, "align": "center", "valign": "vcenter",
+                "border": 1, "border_color": "#E0E0E0",
+                "bg_color": cor_zebra if zebra else "#FFFFFF",
+            })
+
+        def _fmt_tipo(receita, zebra=False):
+            return workbook.add_format({
+                "font_name": "Arial", "font_size": 9, "bold": True, "align": "center", "valign": "vcenter",
+                "border": 1, "border_color": "#E0E0E0",
+                "bg_color": cor_receita_bg if receita else cor_despesa_bg,
+                "font_color": cor_receita_fg if receita else cor_despesa_fg,
+            })
+
+        fmt_total_label = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 9.5, "font_color": "#FFFFFF",
+            "fg_color": INK, "align": "right", "valign": "vcenter", "border": 1, "border_color": INK,
+        })
+        fmt_total_valor = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 9.5, "font_color": "#FFFFFF",
+            "fg_color": INK, "num_format": "R$ #,##0.00", "align": "right", "valign": "vcenter",
+            "border": 1, "border_color": INK,
         })
 
-        fmt_moeda = workbook.add_format({
-            "font_name": "Arial",
-            "font_size": 9,
-            "num_format": "R$ #,##0.00",
-            "align": "right",
-            "valign": "vcenter",
-            "border": 1,
-            "border_color": "#E0E0E0",
-        })
+        # -------- Título --------
+        worksheet.merge_range(linha_titulo, 0, linha_titulo, max(n_cols - 1, 1), "", fmt_titulo)
+        worksheet.write(linha_titulo, 0, "🦩 Fluxo de Caixa — Farmácia Jr.", fmt_titulo)
+        worksheet.merge_range(linha_titulo + 1, 0, linha_titulo + 1, max(n_cols - 1, 1), "", fmt_subtitulo)
+        worksheet.write(
+            linha_titulo + 1, 0,
+            f"Exportado em {datetime.now().strftime('%d/%m/%Y')} · {n_linhas} lançamento(s)",
+            fmt_subtitulo,
+        )
 
-        fmt_data = workbook.add_format({
-            "font_name": "Arial",
-            "font_size": 9,
-            "align": "center",
-            "valign": "vcenter",
-            "border": 1,
-            "border_color": "#E0E0E0",
-        })
-
+        # -------- Cabeçalho --------
         for col_num, value in enumerate(df_formatado.columns):
-            worksheet.write(0, col_num, value, fmt_cabecalho)
+            worksheet.write(linha_cabecalho, col_num, value, fmt_cabecalho)
 
-        for row_num in range(len(df_formatado)):
+        # -------- Linhas de dados --------
+        for row_num in range(n_linhas):
+            zebra = row_num % 2 == 1
+            linha_planilha = primeira_linha_dados + row_num
+            eh_receita = str(df_formatado.iloc[row_num].get("Tipo", "")).strip().lower() == "receita"
+
             for col_num, col_name in enumerate(df_formatado.columns):
                 val = df_formatado.iloc[row_num, col_num]
                 if "Valor" in col_name or "Taxa" in col_name:
                     worksheet.write_number(
-                        row_num + 1, col_num, float(val or 0.0), fmt_moeda
+                        linha_planilha, col_num, float(val or 0.0), _fmt_moeda(zebra)
                     )
-                elif "Data" in col_name:
-                    worksheet.write(row_num + 1, col_num, str(val or ""), fmt_data)
+                elif col_name == "Data":
+                    worksheet.write(linha_planilha, col_num, str(val or ""), _fmt_data(zebra))
+                elif col_name == "Tipo":
+                    worksheet.write(linha_planilha, col_num, str(val or ""), _fmt_tipo(eh_receita, zebra))
                 else:
-                    worksheet.write(row_num + 1, col_num, str(val or ""), fmt_celula)
+                    worksheet.write(linha_planilha, col_num, str(val or ""), _fmt_celula(zebra))
 
+        # -------- Linha de totais (fórmula, recalcula se a planilha for editada) --------
+        linha_total = primeira_linha_dados + n_linhas
+        col_letras = {i: chr(65 + i) for i in range(26)}  # suficiente até 26 colunas
+        worksheet.merge_range(
+            linha_total, 0, linha_total, n_cols - 2 if n_cols > 1 else 0, "TOTAL", fmt_total_label
+        )
+        for col_num, col_name in enumerate(df_formatado.columns):
+            if col_name in ("Valor Bruto", "Taxas", "Valor Líquido") and n_linhas > 0:
+                letra = col_letras.get(col_num, None)
+                if letra:
+                    inicio = f"{letra}{primeira_linha_dados + 1}"
+                    fim = f"{letra}{primeira_linha_dados + n_linhas}"
+                    worksheet.write_formula(
+                        linha_total, col_num, f"=SUM({inicio}:{fim})", fmt_total_valor
+                    )
+
+        # -------- Largura de colunas, autofiltro e congelamento --------
         for col_num, col_name in enumerate(df_formatado.columns):
             max_len = (
                 max(
@@ -313,20 +376,22 @@ def gerar_excel_estilizado(df_export):
             )
             worksheet.set_column(col_num, col_num, min(max_len, 45))
 
-        worksheet.freeze_panes(1, 0)
+        if n_linhas > 0:
+            worksheet.autofilter(
+                linha_cabecalho, 0, linha_cabecalho + n_linhas, n_cols - 1
+            )
+        worksheet.freeze_panes(primeira_linha_dados, 0)
+        worksheet.hide_gridlines(2)
 
     return buffer.getvalue()
 
 
 def renderizar_aba_fluxo_caixa():
     """Renderiza a interface do Fluxo de Caixa no Streamlit."""
+    injetar_estilos()
     garantir_colunas_documentacao()
 
-    st.markdown(
-        "<h2 style='text-align: center; color: #C71585;'>📊 Fluxo de Caixa Geral — Farmácia Jr.</h2>",
-        unsafe_allow_html=True,
-    )
-    st.write("Gerencie os registros financeiros de forma manual ou por IA.")
+    page_header("💳", "Fluxo de Caixa", "Gerencie os registros financeiros de forma manual ou por IA")
 
     lista_meses = [
         "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -344,7 +409,7 @@ def renderizar_aba_fluxo_caixa():
     )
 
     with aba_manual:
-        with st.expander("Abrir Formulário de Operação Manual"):
+        with st.expander("Abrir formulário de operação manual"):
             data = st.date_input("Data do Lançamento", value=datetime.now())
             depto = st.selectbox(
                 "Departamento",
@@ -395,7 +460,7 @@ def renderizar_aba_fluxo_caixa():
                     st.rerun()
 
     with aba_pdf:
-        st.markdown("#### 🤖 Leitura Cognitiva de Extratos com Gemini")
+        section_header("Automação", "Leitura cognitiva de extratos com Gemini")
         st.caption("Faça o upload do PDF. O Gemini detectará o banco, datas e valores automaticamente.")
 
         arquivo_pdf = st.file_uploader(
@@ -505,7 +570,8 @@ def renderizar_aba_fluxo_caixa():
             else:
                 st.error("Não foi possível extrair texto do PDF.")
 
-    st.markdown("---")
+    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="fj-divider"></div>', unsafe_allow_html=True)
 
     if not df.empty:
         receitas_pagas = df[
@@ -517,38 +583,39 @@ def renderizar_aba_fluxo_caixa():
             & (df["status_pagamento"].str.contains("Pago", na=False))
         ]["valor_liquido"].sum()
         saldo_real = receitas_pagas - despesas_pagas
-        cor_saldo_txt = "#2E7D32" if saldo_real >= 0 else "#C62828"
+        cor_saldo = VERDANT if saldo_real >= 0 else CORAL
 
-        st.markdown(
-            f"""
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                <div style="background-color: #EBF7EE; border-left: 5px solid #2E7D32; padding: 12px; border-radius: 6px;">
-                    <span style="color: #555; font-size: 12px; font-weight: bold;">📥 RECEITAS (LÍQ)</span>
-                    <h3 style="color: #2E7D32; margin: 2px 0 0 0;">R$ {receitas_pagas:.2f}</h3>
-                </div>
-                <div style="background-color: #FDF2F2; border-left: 5px solid #C62828; padding: 12px; border-radius: 6px;">
-                    <span style="color: #555; font-size: 12px; font-weight: bold;">📤 DESPESAS ACUMULADAS</span>
-                    <h3 style="color: #C62828; margin: 2px 0 0 0;">R$ {despesas_pagas:.2f}</h3>
-                </div>
-                <div style="background-color: {'#E8F5E9' if saldo_real >= 0 else '#FFEBEE'}; border-left: 5px solid {cor_saldo_txt}; padding: 12px; border-radius: 6px;">
-                    <span style="color: #555; font-size: 12px; font-weight: bold;">⚖️ SALDO ATUAL</span>
-                    <h3 style="color: {cor_saldo_txt}; margin: 2px 0 0 0;">R$ {saldo_real:.2f}</h3>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        m1, m2, m3 = st.columns(3)
+        metric_card(
+            m1, "Receitas (líq.)", "📥", f"{VERDANT}22",
+            formatar_moeda(receitas_pagas),
+            f"linear-gradient(90deg, {VERDANT}, {SAGE})",
+        )
+        metric_card(
+            m2, "Despesas acumuladas", "📤", f"{CORAL}22",
+            formatar_moeda(despesas_pagas),
+            f"linear-gradient(90deg, {CORAL}, #F2A38B)",
+        )
+        metric_card(
+            m3, "Saldo atual", "⚖️", f"{cor_saldo}22",
+            formatar_moeda(saldo_real),
+            f"linear-gradient(90deg, {cor_saldo}, {SAGE})",
         )
 
-        st.markdown("### 🔍 Consultas e Exportação")
+        st.markdown("<div style='height:22px;'></div>", unsafe_allow_html=True)
+
+        section_header("Consultas", "Filtros e exportação")
+        st.markdown('<div class="fj-filter-bar">', unsafe_allow_html=True)
         c_f1, c_f2, c_f3 = st.columns(3)
-        filtro_mes = c_f1.selectbox("Filtrar por Mês:", ["Todos"] + lista_meses)
+        filtro_mes = c_f1.selectbox("Mês", ["Todos"] + lista_meses)
         filtro_depto = c_f2.selectbox(
-            "Filtrar por Diretoria:",
+            "Diretoria",
             ["Todas", "IMAGEM", "AR", "VP", "PRESIDÊNCIA", "PROJETOS", "NEGÓCIOS"],
         )
         filtro_status = c_f3.selectbox(
-            "Filtrar por Pagamento:", ["Todos", "🟢 Pago", "🟡 Pendente"]
+            "Pagamento", ["Todos", "🟢 Pago", "🟡 Pendente"]
         )
+        st.markdown('</div>', unsafe_allow_html=True)
 
         df_filtrado = df.copy()
         if filtro_mes != "Todos":
@@ -564,7 +631,7 @@ def renderizar_aba_fluxo_caixa():
         excel_estilizado_bytes = gerar_excel_estilizado(df_filtrado)
 
         st.download_button(
-            label="📊 Baixar Relatório Consolidado em Excel (.xlsx)",
+            label="📊 Baixar relatório consolidado em Excel (.xlsx)",
             data=excel_estilizado_bytes,
             file_name=(
                 "Planilha_Fluxo_Caixa_FarmaciaJr_"
@@ -576,50 +643,64 @@ def renderizar_aba_fluxo_caixa():
             use_container_width=True,
         )
 
-        st.markdown(
-            f"#### 📄 Lançamentos Encontrados ({len(df_filtrado)} registros)"
-        )
+        st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
+        section_header("Registros", f"{len(df_filtrado)} lançamentos encontrados")
+
         for idx, row in df_filtrado.iterrows():
-            with st.container():
-                col_l1, col_l2, col_l3, col_l4 = st.columns([1, 4, 2, 1])
-                cor_tipo = "#E8F5E9" if row["tipo"] == "Receita" else "#FFEBEE"
-                txt_tipo_cor = "#2E7D32" if row["tipo"] == "Receita" else "#C62828"
+            cor_tipo = VERDANT if row["tipo"] == "Receita" else CORAL
+            status_ok = "Pago" in str(row["status_pagamento"])
 
-                col_l1.markdown(
-                    f"""
-                    <div style="background-color: {cor_tipo}; color: {txt_tipo_cor}; text-align: center; border-radius: 4px; padding: 4px; font-weight: bold; font-size: 12px;">
-                        {row['data'][5:]}<br>{row['tipo'][:3].upper()}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+            st.markdown('<div class="fj-list-row">', unsafe_allow_html=True)
+            col_l1, col_l2, col_l3, col_l4 = st.columns([1, 4, 2, 1])
 
-                col_l2.write(f"**{row['descricao']}**")
-                col_l2.caption(
-                    f"📁 Setor: {row['departamento']} | Categoria: {row['categoria']} |"
-                    f" Conta: {row['conta_origem']}"
-                )
-
-                col_l3.write(f"💸 **Líq:** R$ {row['valor_liquido']:.2f}")
-                col_l3.caption(
-                    f"Status: {row['status_pagamento']} | NF: {row['nota_fiscal']}"
-                )
-
-                if col_l4.button(
-                    "🗑️", key=f"del_fluxo_{row['id']}", help="Excluir lançamento"
-                ):
-                    conn = sqlite3.connect(DB_PATH)
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "DELETE FROM fluxo_caixa_geral WHERE id = ?", (row["id"],)
-                    )
-                    conn.commit()
-                    conn.close()
-                    st.success("Removido!")
-                    st.rerun()
-            st.markdown(
-                "<hr style='margin: 4px 0; border: 0.5px solid #F8F8F8;'>",
+            col_l1.markdown(
+                f"""
+                <div class="fj-date-pill" style="background:{cor_tipo}18; color:{cor_tipo};">
+                    {row['data'][5:]}<br>{row['tipo'][:3].upper()}
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
+
+            col_l2.markdown(f'<div class="fj-desc">{row["descricao"]}</div>', unsafe_allow_html=True)
+            col_l2.markdown(
+                f'<div class="fj-meta">📁 {row["departamento"]} · {row["categoria"]} · {row["conta_origem"]}</div>',
+                unsafe_allow_html=True,
+            )
+
+            col_l3.markdown(f'<div class="fj-value">R$ {row["valor_liquido"]:.2f}</div>', unsafe_allow_html=True)
+            col_l3.markdown(
+                pill(row["status_pagamento"], VERDANT if status_ok else "#C9A227")
+                + pill(row["nota_fiscal"], SLATE),
+                unsafe_allow_html=True,
+            )
+
+            if col_l4.button(
+                "🗑️", key=f"del_fluxo_{row['id']}", help="Excluir lançamento"
+            ):
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM fluxo_caixa_geral WHERE id = ?", (row["id"],)
+                )
+                conn.commit()
+                conn.close()
+                st.success("Removido!")
+                st.rerun()
+
+            st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.info("A tabela de fluxo de caixa está limpa no momento.")
+        st.markdown(
+            f"""
+            <div class="fj-chart-card" style="text-align:center; padding:36px 20px;">
+                <div style="font-size:28px;">🧫</div>
+                <p style="font-family:'Space Grotesk',sans-serif; font-weight:600; color:{INK}; margin:10px 0 4px 0;">
+                    A tabela de fluxo de caixa está limpa no momento
+                </p>
+                <p style="font-family:'Inter',sans-serif; font-size:13px; color:{SLATE}; margin:0;">
+                    Lance um registro manual ou importe um extrato por IA para começar.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
