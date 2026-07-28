@@ -232,7 +232,7 @@ def renderizar_dashboard_geral():
     st.markdown(
         f"""
         <div class="fj-header">
-            <div class="fj-header-icon">🧪</div>
+            <div class="fj-header-icon">🦩</div>
             <div>
                 <p class="fj-header-title">Painel Financeiro</p>
                 <p class="fj-header-caption">Visão consolidada da saúde financeira, origem de receitas e saídas por diretoria</p>
@@ -347,7 +347,9 @@ def renderizar_dashboard_geral():
         font=dict(color=INK, size=12, family="Inter, sans-serif"),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(font=dict(size=11)),
+        legend=dict(font=dict(color=INK, size=11)),
+        xaxis=dict(tickfont=dict(color=INK), title_font=dict(color=INK)),
+        yaxis=dict(tickfont=dict(color=INK), title_font=dict(color=INK)),
     )
 
     # -------------------------------------------------------------
@@ -390,7 +392,14 @@ def renderizar_dashboard_geral():
                 color_discrete_sequence=[VERDANT, SAGE, "#C9E4D6", INK, "#4FAE7A", "#B7DCC6"],
                 hole=0.55,
             )
-            fig_pizza.update_layout(**estilo_layout_grafico)
+            fig_pizza.update_traces(
+                textposition="outside",
+                textinfo="percent+label",
+                textfont=dict(color=INK, size=12, family="Inter, sans-serif"),
+                outsidetextfont=dict(color=INK, size=12, family="Inter, sans-serif"),
+                marker=dict(line=dict(color=CLOUD, width=2)),
+            )
+            fig_pizza.update_layout(**estilo_layout_grafico, showlegend=False)
             st.plotly_chart(fig_pizza, use_container_width=True)
         else:
             st.caption("Nenhuma receita registrada no filtro selecionado.")
