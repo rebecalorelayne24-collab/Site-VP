@@ -89,7 +89,7 @@ def salvar_lancamento(
 
 
 def ler_extrato_com_gemini(texto_pdf):
-    """Realiza a leitura do extrato usando estritamente o modelo gemini-2.5-flash."""
+    """Lê qualquer extrato usando modelos ativos e o alias gemini-flash-latest."""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if api_key:
         api_key = str(api_key).strip().strip('"').strip("'")
@@ -99,7 +99,7 @@ def ler_extrato_com_gemini(texto_pdf):
         return []
 
     if not texto_pdf or len(texto_pdf.strip()) < 10:
-        st.warning("⚠️ O PDF parece estar sem texto editável.")
+        st.warning("⚠️ O PDF parece estar sem texto editável (imagem digitalizada).")
         return []
 
     try:
@@ -107,35 +107,59 @@ def ler_extrato_com_gemini(texto_pdf):
 
         prompt = f"""
         Você é um assistente financeiro da Farmácia Jr. (UFMG).
-        Analise o texto deste extrato bancário e extraia TODOS os lançamentos válidos de entrada e saída.
-        Ignore linhas de saldos ou rendimentos informativos.
+        Analise o texto deste extrato bancário (que pode ter datas em cabeçalhos e nomes divididos em várias linhas) e extraia TODOS os lançamentos válidos de entrada e saída.
+        Ignore saldos finais de dia, resumos, CNPJ ou rodapés.
 
-        Retorne obrigatoriamente uma lista JSON no formato puro:
+        Retorne obrigatoriamente uma lista JSON no formato puro (sem marcadores adicionais fora do array):
         [
-            {{"data": "2026-03-15", "tipo": "Receita", "descricao": "PIX RECEBIDO - JOAO SILVA", "valor_bruto": 150.00}},
-            {{"data": "2026-03-16", "tipo": "Despesa", "descricao": "COMPRA DE JALECOS", "valor_bruto": 450.50}}
+            {{"data": "2026-06-30", "tipo": "Receita", "descricao": "PIX RECEBIDO - VITORIA FERNANDES PEREIRA", "valor_bruto": 2.00}},
+            {{"data": "2026-06-20", "tipo": "Despesa", "descricao": "PIX ENVIADO - AMERICANAS SA", "valor_bruto": 32.99}}
         ]
 
-        Regras:
-        - data: YYYY-MM-DD
-        - tipo: "Receita" ou "Despesa"
+        Regras de Negócio:
+        - data: YYYY-MM-DD (Atente-se aos cabeçalhos de data como '30 de junho 2026')
+        - tipo: "Receita" (entradas/+R$) ou "Despesa" (saídas/-R$)
+        - descricao: Nome limpo da pessoa/empresa + tipo da operação
         - valor_bruto: número float positivo
 
         Texto do extrato:
         {texto_pdf}
         """
 
-        # Modelo fixado diretamente no gemini-2.5-flash
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        res = model.generate_content(prompt)
+        # Modelos ativos (inclui o alias automático 'gemini-flash-latest')
+        modelos_fila = [
+            "gemini-flash-latest",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
+        ]
 
-        if not res or not res.text:
-            st.error("⚠️ Não foi possível obter resposta da IA.")
+        resposta_texto = None
+        ultimo_erro = None
+        erro_cota = False
+
+        for nome_m in modelos_fila:
+            try:
+                model = genai.GenerativeModel(nome_m)
+                res = model.generate_content(prompt)
+                if res and res.text:
+                    resposta_texto = res.text.strip()
+                    break
+            except Exception as err:
+                msg = str(err)
+                ultimo_erro = msg
+                if "429" in msg or "quota" in msg.lower():
+                    erro_cota = True
+                continue
+
+        if not resposta_texto:
+            if erro_cota:
+                st.error("⏳ A cota gratuita da sua API Key foi excedida. Crie uma nova API Key no Google AI Studio e atualize nos Secrets do Streamlit Cloud.")
+            else:
+                st.error(f"⚠️ Erro ao comunicar com a IA: {ultimo_erro}")
             return []
 
-        resposta_texto = res.text.strip()
-
-        # Limpeza caso o modelo retorne marcadores de bloco markdown ```json
+        # Limpeza de marcadores markdown
         if "```" in resposta_texto:
             partes = resposta_texto.split("```")
             for parte in partes:
@@ -150,10 +174,10 @@ def ler_extrato_com_gemini(texto_pdf):
         return dados if isinstance(dados, list) else []
 
     except json.JSONDecodeError as e:
-        st.error(f"A IA não formatou o JSON corretamente: {e}")
+        st.error(f"A IA não formatou a lista JSON corretamente: {e}")
         return []
     except Exception as e:
-        st.error(f"Erro no processamento da IA: {e}")
+        st.error(f"Erro no processamento: {e}")
         return []
 
 
@@ -304,7 +328,7 @@ def renderizar_aba_fluxo_caixa():
 
     with aba_pdf:
         st.markdown("#### 🤖 Leitura Cognitiva de Extratos com Gemini")
-        st.caption("Faça o upload do PDF para mapeamento automático das transações.")
+        st.caption("Faça o upload do PDF. O Gemini interpretará todas as transações de qualquer banco.")
 
         arquivo_pdf = st.file_uploader("Escolha o arquivo do Extrato (.pdf)", type=["pdf"], key="uploader_ia_fluxo")
         if arquivo_pdf is not None:
