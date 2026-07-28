@@ -89,7 +89,7 @@ def salvar_lancamento(
 
 
 def ler_extrato_com_gemini(texto_pdf):
-    """Realiza a leitura do extrato em texto usando a API Gemini."""
+    """Realiza a leitura do extrato em texto usando a API Gemini com fallback limpo."""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
     if not api_key:
@@ -123,10 +123,11 @@ def ler_extrato_com_gemini(texto_pdf):
         {texto_pdf}
         """
 
+        # Modelos homologados e suportados na API
         modelos_validos = [
+            "gemini-2.5-flash",
             "gemini-2.0-flash",
-            "gemini-1.5-flash-8b",
-            "gemini-1.5-pro",
+            "gemini-1.5-flash"
         ]
 
         resposta_texto = None
