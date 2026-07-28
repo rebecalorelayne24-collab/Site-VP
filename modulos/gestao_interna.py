@@ -1,307 +1,191 @@
-import streamlit as st
+import os
 import sqlite3
-import pandas as pd
-import plotly.express as px
-from datetime import datetime, timedelta
-import urllib.parse
-from modulos.fluxo_caixa import salvar_lancamento
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-def inicializar_banco_gestao():
-    conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+import pandas as pd
+import streamlit as st
+
+DB_PATH = "database/financeiro_v2.db"
+FUSO_BR = ZoneInfo("America/Sao_Paulo")
+
+
+def obter_agora_br():
+    """Retorna o datetime atual no fuso horário de Brasília."""
+    return datetime.now(FUSO_BR)
+
+
+def inicializar_banco_gestao_interna():
+    """Garante a existência da pasta e de todas as tabelas necessárias no SQLite."""
+    if not os.path.exists("database"):
+        os.makedirs("database")
+
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS contratos_ej (
+
+    # Tabela de Usuários / Membros (Corrige o DatabaseError do Pandas)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente TEXT,
-            projeto TEXT,
-            valor_total REAL,
-            parcelas_totais INTEGER,
-            parcelas_pagas INTEGER,
-            vencimento TEXT,
-            link_drive TEXT,
-            status_boleto TEXT
+            nome TEXT UNIQUE NOT NULL,
+            email TEXT,
+            departamento TEXT,
+            cargo TEXT DEFAULT 'Membro'
         )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS tarefas_assessores (
+    """)
+
+    # Tabela de Tarefas / Gestão Interna
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tarefas_internas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tarefa TEXT,
-            assessor_nome TEXT,
-            diretoria TEXT,
-            prazo TEXT,
-            status TEXT
+            titulo TEXT NOT NULL,
+            responsavel TEXT,
+            departamento TEXT,
+            prioridade TEXT,
+            data_limite TEXT,
+            status TEXT DEFAULT '🟡 Em Andamento'
         )
-    ''')
+    """)
+
     conn.commit()
     conn.close()
 
-def converter_data_segura(str_data):
-    """Converte strings de data em datetime aceitando múltiplos formatos com segurança"""
-    if not str_data:
-        return None
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
-        try:
-            return datetime.strptime(str_data.strip(), fmt)
-        except ValueError:
-            pass
-    return None
 
 def renderizar_gestao_interna():
-    inicializar_banco_gestao()
-    lista_meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
-    hoje_dt = datetime.now()
-    
-    st.markdown("<h2 style='text-align: center; color: #FF1493;'>💼 Central de Negócios & Gestão Interna</h2>", unsafe_allow_html=True)
-    
-    tab_contratos, tab_tarefas = st.tabs(["🤝 Controle de Contratos & Boletos", "📋 Distribuição de Tarefas (Kanban)"])
+    """Função chamada na linha 216 do app.py."""
+    inicializar_banco_gestao_interna()
+
+    st.markdown(
+        "<h2 style='text-align: center; color: #C71585;'>📋 Gestão Interna & Equipe — Farmácia Jr.</h2>",
+        unsafe_allow_html=True,
+    )
+    st.write("Acompanhe os membros da equipe, atribuição de tarefas e pendências internas da diretoria.")
+
+    lista_deptos = ["VP", "IMAGEM", "AR", "PRESIDÊNCIA", "PROJETOS", "NEGÓCIOS"]
+
+    aba_membros, aba_tarefas = st.tabs(["👤 Membros & Equipe", "📌 Quadro de Tarefas"])
 
     # =======================================================================
-    # 1. TELA: CONTROLE DE CONTRATOS & RECEBÍVEIS
+    # ABA 1: USUÁRIOS E MEMBROS
     # =======================================================================
-    with tab_contratos:
-        st.markdown("### 📜 Gestão de Contratos e Inteligência de Recebíveis")
-        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-        df_con = pd.read_sql_query("SELECT * FROM contratos_ej ORDER BY id DESC", conn)
-        conn.close()
+    with aba_membros:
+        st.markdown("### 👤 Cadastro de Membros")
 
-        previsao_90_dias = 0.0
-        total_atrasado = 0.0
-        status_contagem = {"🟢 Finalizado": 0, "🟡 A Receber": 0, "🔴 Em Atraso": 0}
+        with st.expander("➕ Cadastrar Novo Membro"):
+            c1, c2, c3 = st.columns(3)
+            nome_m = c1.text_input("Nome Completo:").strip()
+            email_m = c2.text_input("E-mail Institucional:").strip()
+            dep_m = c3.selectbox("Diretoria:", lista_deptos, key="dep_membro_cad")
 
-        if not df_con.empty:
-            for idx, row in df_con.iterrows():
-                val_parcela = row['valor_total'] / row['parcelas_totais'] if row['parcelas_totais'] > 0 else row['valor_total']
-                venc_dt = converter_data_segura(row['vencimento'])
-                
-                if row['parcelas_pagas'] >= row['parcelas_totais']:
-                    status_contagem["🟢 Finalizado"] += 1
-                elif venc_dt and venc_dt < hoje_dt:
-                    status_contagem["🔴 Em Atraso"] += 1
-                    total_atrasado += val_parcela
-                else:
-                    status_contagem["🟡 A Receber"] += 1
-                    if venc_dt and hoje_dt <= venc_dt <= (hoje_dt + timedelta(days=90)):
-                        previsao_90_dias += val_parcela
-
-        # Cards Executivos
-        col_c1, col_c2 = st.columns(2)
-        with col_c1:
-            st.markdown(f"""
-            <div style="background-color: #E0F7FA; border-left: 5px solid #00838F; padding: 15px; border-radius: 8px;">
-                <span style="color: #444; font-size: 13px; font-weight: bold;">🔮 PREVISÃO DE RECEITA (90 DIAS)</span>
-                <h2 style="color: #00838F; margin: 5px 0 0 0; font-size: 24px;">R$ {previsao_90_dias:.2f}</h2>
-                <span style="color: #666; font-size: 11px;">Boletos a vencer nos próximos 3 meses</span>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        with col_c2:
-            st.markdown(f"""
-            <div style="background-color: {'#FFF3E0' if total_atrasado == 0 else '#FFEBEE'}; border-left: 5px solid {'#E65100' if total_atrasado == 0 else '#C62828'}; padding: 15px; border-radius: 8px;">
-                <span style="color: #444; font-size: 13px; font-weight: bold;">⚠️ ÍNDICE DE INADIMPLÊNCIA ATUAL</span>
-                <h2 style="color: {'#E65100' if total_atrasado == 0 else '#C62828'}; margin: 5px 0 0 0; font-size: 24px;">R$ {total_atrasado:.2f}</h2>
-                <span style="color: #666; font-size: 11px;">{'Nenhum boleto em atraso na EJ' if total_atrasado == 0 else 'Valores com vencimento ultrapassado'}</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # ⚡ MELHORIA 2: Calculadora & Gerador de Parcelas Integrado no Formulário
-        with st.expander("➕ Cadastrar Novo Contrato Fechado"):
-            with st.form("form_contrato", clear_on_submit=True):
-                c1, c2 = st.columns(2)
-                cli = c1.text_input("Nome do Cliente / Empresa:").strip().title()
-                proj = c2.text_input("Nome do Projeto:").strip()
-                
-                c3, c4, c5 = st.columns(3)
-                v_tot = c3.number_input("Valor Total (R$):", min_value=0.0)
-                parc_t = c4.number_input("Total Parcelas:", min_value=1, value=1)
-                parc_p = c5.number_input("Parcelas Quitadas Inicialmente:", min_value=0, value=0)
-                
-                c6, c7 = st.columns(2)
-                venc = c6.text_input("Próximo Vencimento (DD/MM/AAAA):", value=hoje_dt.strftime("%d/%m/%Y"))
-                link = c7.text_input("Link da Pasta de Anexos (Drive):")
-                
-                if st.form_submit_button("💾 Salvar Contrato"):
-                    if cli and proj and v_tot > 0:
-                        status_bol = "🟢 Finalizado" if parc_p >= parc_t else "🟡 Aguardando Compensação"
-                        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+            if st.button("💾 Cadastrar Membro", use_container_width=True):
+                if nome_m:
+                    try:
+                        conn = sqlite3.connect(DB_PATH)
                         cursor = conn.cursor()
-                        cursor.execute("""
-                            INSERT INTO contratos_ej (cliente, projeto, valor_total, parcelas_totais, parcelas_pagas, vencimento, link_drive, status_boleto)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (cli, proj, v_tot, parc_t, parc_p, venc, link, status_bol))
-                        conn.commit()
-                        conn.close()
-                        st.success("Contrato registrado com sucesso!")
-                        st.rerun()
-
-        # Listagem Visual de Contratos
-        if not df_con.empty:
-            st.markdown("#### 📄 Contratos Ativos & Histórico")
-            for idx, row in df_con.iterrows():
-                status_atual = row['status_boleto']
-                if row['parcelas_pagas'] < row['parcelas_totais']:
-                    venc_dt = converter_data_segura(row['vencimento'])
-                    if venc_dt and venc_dt < hoje_dt:
-                        status_atual = "🔴 Em Atraso"
-                    else:
-                        status_atual = "🟡 A Receber"
-                        
-                cor_status = "#E8F5E9" if "🟢" in status_atual or "Finalizado" in status_atual else ("#FFEBEE" if "🔴" in status_atual else "#FFF3E0")
-                txt_status = "#2E7D32" if "🟢" in status_atual or "Finalizado" in status_atual else ("#C62828" if "🔴" in status_atual else "#E65100")
-                
-                st.markdown(f"""
-                <div style="background-color: #FAFAFA; border-left: 5px solid {txt_status}; padding: 12px; border-radius: 6px; margin-bottom: 10px;">
-                    <span style="float: right; background-color: {cor_status}; color: {txt_status}; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold;">{status_atual}</span>
-                    <h4 style="margin: 0; color: #333;">🤝 {row['cliente']} — <span style="font-size: 14px; color: #666;">{row['projeto']}</span></h4>
-                    <p style="margin: 5px 0 0 0; font-size: 14px;">💰 <b>Total:</b> R$ {row['valor_total']:.2f} | 📊 <b>Boletos:</b> {row['parcelas_pagas']}/{row['parcelas_totais']} | 📅 <b>Vencimento:</b> {row['vencimento']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                col_b1, col_b2, col_b3 = st.columns([2, 2, 1])
-                if row['link_drive']: 
-                    col_b1.link_button("📂 Abrir Pasta", row['link_drive'], use_container_width=True)
-                else: 
-                    col_b1.caption("⚪ Sem link anexado.")
-                
-                if row['parcelas_pagas'] < row['parcelas_totais']:
-                    v_parcela = row['valor_total'] / row['parcelas_totais']
-                    if col_b2.button(f"Confirmar Parcela (R$ {v_parcela:.2f})", key=f"p_prc_{row['id']}", use_container_width=True):
-                        n_p = row['parcelas_pagas'] + 1
-                        n_s = "🟢 Finalizado" if n_p == row['parcelas_totais'] else "🟡 Aguardando Compensação"
-                        
-                        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE contratos_ej SET parcelas_pagas = ?, status_boleto = ? WHERE id = ?", (n_p, n_s, row['id']))
-                        conn.commit()
-                        conn.close()
-                        
-                        salvar_lancamento(
-                            lista_meses[hoje_dt.month - 1], hoje_dt.strftime("%Y-%m-%d"), "NEGÓCIOS", "Receita", 
-                            "Serviço Prestado", f"Parc {n_p}/{row['parcelas_totais']} Contrato: {row['cliente']}", 
-                            v_parcela, 0.0, v_parcela, "Banco do Brasil", "🟢 Pago", "🟢 Emitida", "❌ Não enviado"
+                        cursor.execute(
+                            "INSERT INTO usuarios (nome, email, departamento) VALUES (?, ?, ?)",
+                            (nome_m, email_m, dep_m),
                         )
-                        st.success("Boleto liquidado e receita registrada no Fluxo de Caixa!")
-                        st.rerun()
-                        
-                if col_b3.button("🗑️ Deletar", key=f"dl_cn_{row['id']}", use_container_width=True):
-                    conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM contratos_ej WHERE id = ?", (row['id'],))
-                    conn.commit()
-                    conn.close()
-                    st.success("Contrato removido!")
-                    st.rerun()
-
-    # =======================================================================
-    # 2. TELA: QUADRO KANBAN DE DEMANDAS COM FILTRO POR DIRETORIA
-    # =======================================================================
-    with tab_tarefas:
-        st.markdown("### 📋 Painel Didático de Distribuição de Demandas")
-        
-        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-        df_membros = pd.read_sql_query("SELECT nome FROM usuarios ORDER BY nome ASC", conn)
-        conn.close()
-        
-        lista_nomes_membros = df_membros['nome'].tolist() if not df_membros.empty else ["Nenhum membro cadastrado"]
-        
-        with st.expander("➕ Delegar Nova Tarefa para Assessor"):
-            with st.form("form_tarefa"):
-                tar = st.text_input("Descrição da Demanda (O que precisa ser feito?):").strip()
-                ass_selecionado = st.selectbox("Selecione o Assessor Responsável:", lista_nomes_membros)
-                dir_resp = st.selectbox("Diretoria da Demanda:", ["VP", "PROJETOS", "NEGÓCIOS", "IMAGEM", "AR", "PRESIDÊNCIA"])
-                prz = st.text_input("Prazo de Entrega (Ex: Até Sexta 18h):", value="Até sexta-feira")
-                
-                if st.form_submit_button("🚀 Enviar para o Painel"):
-                    if tar and ass_selecionado != "Nenhum membro cadastrado":
-                        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-                        cursor = conn.cursor()
-                        cursor.execute('''
-                            INSERT INTO tarefas_assessores (tarefa, assessor_nome, diretoria, prazo, status)
-                            VALUES (?, ?, ?, ?, '🟡 A Fazer')
-                        ''', (tar, ass_selecionado, dir_resp, prz))
                         conn.commit()
                         conn.close()
-                        st.success(f"Tarefa delegada para {ass_selecionado}!")
+                        st.success(f"Membro {nome_m} cadastrado com sucesso!")
                         st.rerun()
-
-        # Carrega tarefas do banco
-        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-        df_tar = pd.read_sql_query("SELECT * FROM tarefas_assessores", conn)
-        conn.close()
+                    except sqlite3.IntegrityError:
+                        st.error("Este membro já está cadastrado.")
+                else:
+                    st.warning("Preencha ao menos o nome do membro.")
 
         st.markdown("---")
-        
-        # ⚡ MELHORIA 3: Filtro de Busca por Diretoria no Kanban
-        col_filtro_k1, _ = st.columns([2, 2])
-        filtro_dir_kanban = col_filtro_k1.selectbox(
-            "🔍 Filtrar Demandas por Diretoria:", 
-            ["Todas", "VP", "PROJETOS", "NEGÓCIOS", "IMAGEM", "AR", "PRESIDÊNCIA"]
-        )
-        
-        df_tar_filtrado = df_tar.copy()
-        if not df_tar_filtrado.empty and filtro_dir_kanban != "Todas":
-            df_tar_filtrado = df_tar_filtrado[df_tar_filtrado['diretoria'] == filtro_dir_kanban]
 
-        col_todo, col_doing, col_done = st.columns(3)
+        # Leitura Segura de Usuários
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            df_membros = pd.read_sql_query("SELECT id, nome, email, departamento, cargo FROM usuarios ORDER BY nome ASC", conn)
+            conn.close()
+        except Exception:
+            df_membros = pd.DataFrame(columns=["id", "nome", "email", "departamento", "cargo"])
 
-        with col_todo:
-            st.markdown("#### 🟡 A Fazer")
-            df_todo = df_tar_filtrado[df_tar_filtrado['status'] == '🟡 A Fazer'] if not df_tar_filtrado.empty else pd.DataFrame()
-            if df_todo.empty:
-                st.caption("Nenhuma tarefa pendente.")
-            else:
-                for _, r in df_todo.iterrows():
-                    texto_whats = f"Olá, *{r['assessor_nome']}*! Você recebeu uma nova demanda na plataforma da Farmácia Jr.\n\n📋 *Tarefa:* {r['tarefa']}\n📁 *Setor:* {r['diretoria']}\n📅 *Prazo:* {r['prazo']}\n\nPor favor, acesse o site e altere o status ao iniciar!"
-                    texto_codificado = urllib.parse.quote(texto_whats)
-                    link_whatsapp = f"https://wa.me/?text={texto_codificado}"
-                    
-                    st.markdown(f"""
-                    <div style='background-color: #FFF9E6; border-left: 4px solid #FFA000; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
-                        <b>{r['tarefa']}</b><br>
-                        <small>👤 Assessor: {r['assessor_nome']} ({r['diretoria']})<br>📅 Prazo: {r['prazo']}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    c_btn1, c_btn2 = st.columns(2)
-                    if c_btn1.button("⏩ Iniciar", key=f"st_{r['id']}", use_container_width=True):
-                        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE tarefas_assessores SET status = '🔵 Executando' WHERE id = ?", (r['id'],))
-                        conn.commit()
-                        conn.close()
-                        st.rerun()
-                        
-                    c_btn2.link_button("💬 Notificar", link_whatsapp, use_container_width=True)
+        if not df_membros.empty:
+            st.markdown(f"#### 📋 Membros Ativos ({len(df_membros)} cadastrados)")
+            st.dataframe(df_membros[["nome", "departamento", "email", "cargo"]], use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhum membro cadastrado na base ainda.")
 
-        with col_doing:
-            st.markdown("#### 🔵 Em Andamento")
-            df_doing = df_tar_filtrado[df_tar_filtrado['status'] == '🔵 Executando'] if not df_tar_filtrado.empty else pd.DataFrame()
-            if df_doing.empty:
-                st.caption("Nenhuma tarefa em andamento.")
-            else:
-                for _, r in df_doing.iterrows():
-                    st.markdown(f"<div style='background-color: #E3F2FD; border-left: 4px solid #1976D2; padding: 10px; border-radius: 5px; margin-bottom: 5px;'><b>{r['tarefa']}</b><br><small>👤 Assessor: {r['assessor_nome']} ({r['diretoria']})<br>📅 Prazo: {r['prazo']}</small></div>", unsafe_allow_html=True)
-                    if st.button("✅ Concluir", key=f"dn_{r['id']}", use_container_width=True):
-                        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE tarefas_assessores SET status = '🟢 Concluído' WHERE id = ?", (r['id'],))
-                        conn.commit()
-                        conn.close()
-                        st.rerun()
+    # =======================================================================
+    # ABA 2: QUADRO DE TAREFAS
+    # =======================================================================
+    with aba_tarefas:
+        st.markdown("### 📌 Controle de Tarefas Internas")
 
-        with col_done:
-            st.markdown("#### 🟢 Concluído")
-            df_done = df_tar_filtrado[df_tar_filtrado['status'] == '🟢 Concluído'] if not df_tar_filtrado.empty else pd.DataFrame()
-            if df_done.empty:
-                st.caption("Nenhuma tarefa concluída.")
-            else:
-                for _, r in df_done.iterrows():
-                    st.markdown(f"<div style='background-color: #E8F5E9; border-left: 4px solid #388E3C; padding: 10px; border-radius: 5px; margin-bottom: 5px; text-decoration: line-through; color: #777;'><b>{r['tarefa']}</b><br><small>👤 Concluído por: {r['assessor_nome']}</small></div>", unsafe_allow_html=True)
-                    if st.button("🗑️ Limpar", key=f"cl_{r['id']}", use_container_width=True):
-                        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-                        cursor = conn.cursor()
-                        cursor.execute("DELETE FROM tarefas_assessores WHERE id = ?", (r['id'],))
-                        conn.commit()
-                        conn.close()
-                        st.rerun()
+        # Lista de membros atualizada para o selectbox
+        lista_membros_opcoes = df_membros["nome"].tolist() if not df_membros.empty else ["Nenhum membro cadastrado"]
+
+        with st.expander("➕ Nova Tarefa / Demanda"):
+            t1, t2, t3 = st.columns(3)
+            titulo_t = t1.text_input("Título da Tarefa:").strip()
+            resp_t = t2.selectbox("Membro Responsável:", lista_membros_opcoes)
+            dep_t = t3.selectbox("Diretoria:", lista_deptos, key="dep_tarefa_cad")
+
+            t4, t5 = st.columns(2)
+            prio_t = t4.selectbox("Prioridade:", ["🔴 Alta", "🟡 Média", "🟢 Baixa"])
+            dt_limite = t5.date_input("Data Limite:", value=obter_agora_br())
+
+            if st.button("📌 Criar Tarefa", use_container_width=True):
+                if titulo_t and resp_t != "Nenhum membro cadastrado":
+                    conn = sqlite3.connect(DB_PATH)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        INSERT INTO tarefas_internas (titulo, responsavel, departamento, prioridade, data_limite, status)
+                        VALUES (?, ?, ?, ?, ?, '🟡 Em Andamento')
+                    """,
+                        (titulo_t, resp_t, dep_t, prio_t, dt_limite.strftime("%Y-%m-%d")),
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success("Tarefa registrada!")
+                    st.rerun()
+                else:
+                    st.error("Insira o título da tarefa e selecione um responsável válido.")
+
+        st.markdown("---")
+
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            df_tarefas = pd.read_sql_query("SELECT * FROM tarefas_internas ORDER BY id DESC", conn)
+            conn.close()
+        except Exception:
+            df_tarefas = pd.DataFrame()
+
+        if not df_tarefas.empty:
+            st.markdown("#### 📋 Painel de Tarefas")
+            for idx, row in df_tarefas.iterrows():
+                with st.container():
+                    col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+                    col1.write(f"📌 **{row['titulo']}**")
+                    col1.caption(f"👤 Responsável: {row['responsavel']} ({row['departamento']}) | Até: {row['data_limite']}")
+
+                    col2.write(f"Prioridade: {row['prioridade']}")
+                    col3.write(f"Status: **{row['status']}**")
+
+                    if "Em Andamento" in str(row["status"]):
+                        if col4.button("🟢 Concluir", key=f"conc_tar_{row['id']}"):
+                            conn = sqlite3.connect(DB_PATH)
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE tarefas_internas SET status = '🟢 Concluída' WHERE id = ?", (row["id"],))
+                            conn.commit()
+                            conn.close()
+                            st.success("Concluída!")
+                            st.rerun()
+                    else:
+                        if col4.button("🗑️", key=f"del_tar_{row['id']}"):
+                            conn = sqlite3.connect(DB_PATH)
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM tarefas_internas WHERE id = ?", (row["id"],))
+                            conn.commit()
+                            conn.close()
+                            st.success("Excluída!")
+                            st.rerun()
+                st.markdown("<hr style='margin: 4px 0; border: 0.5px solid #F8F8F8;'>", unsafe_allow_html=True)
+        else:
+            st.info("Nenhuma tarefa registrada no momento.")
