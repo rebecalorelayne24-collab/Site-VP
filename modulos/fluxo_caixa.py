@@ -360,7 +360,7 @@ def renderizar_aba_fluxo_caixa():
             v_taxa = st.number_input("Taxas (R$)", min_value=0.0, value=0.0)
             v_liq = v_bruto - v_taxa
             conta = st.selectbox(
-                "Conta de Origem", ["PicPay", "Banco do Brasil", "Caixa", "Itaú", "Nubank"]
+                "Conta de Origem", ["PicPay", "Banco do Brasil", "Caixa", "Itaú", "Nubank", "Cora", "Banco BTG"]
             )
             pagamento = st.selectbox(
                 "Status do Pagamento", ["🟢 Pago", "🟡 Pendente"]
