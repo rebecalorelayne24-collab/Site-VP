@@ -125,7 +125,6 @@ def ler_extrato_com_gemini(texto_pdf):
 
         modelos_validos = [
             "gemini-2.5-flash",
-            "gemini-2.0-flash"
         ]
 
         resposta_texto = None
