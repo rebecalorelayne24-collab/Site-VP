@@ -149,7 +149,7 @@ def ler_extrato_com_gemini(texto_pdf):
         - tipo: "Receita" ou "Despesa"
         - descricao: Nome limpo da pessoa/empresa + tipo da operação
         - valor_bruto: número float positivo
-        - banco: Nome do banco identificado no extrato (ex: 'PicPay', 'Banco do Brasil', 'Caixa')
+        - banco: Nome do banco identificado no extrato (ex: 'PicPay', 'Banco do Brasil', 'Caixa', 'Cora', 'Banco BTG')
 
         Texto do extrato:
         {texto_pdf}
