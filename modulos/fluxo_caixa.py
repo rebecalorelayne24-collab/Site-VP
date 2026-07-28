@@ -121,7 +121,7 @@ def ler_extrato_com_gemini(texto_pdf):
         {texto_pdf}
         """
 
-        modelos = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+        modelos = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.0-pro"]
         resposta_texto = None
         ultimo_erro = None
 
