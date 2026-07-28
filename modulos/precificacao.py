@@ -1,14 +1,15 @@
 import io
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import docx
 from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement, parse_xml
-from docx.oxml.ns import nsdecls, qn
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 from docx.shared import Inches, Pt, RGBColor
 import google.generativeai as genai
 import pandas as pd
@@ -17,7 +18,6 @@ import streamlit as st
 
 FUSO_BR = ZoneInfo("America/Sao_Paulo")
 
-# Tabela oficial de preços base da Farmácia Jr.
 PRECOS_AUTORAIS = {
     "Rotulagem Nutricional": 130.00,
     "Tabela Nutricional": 90.00,
@@ -43,7 +43,7 @@ def calcular_data_final_uteis(data_inicial, dias_uteis):
 
 
 def extrair_valor_pdf_com_ia(arquivo_pdf):
-    """Lê o PDF do orçamento do laboratório e usa Gemini para extrair o valor bruto."""
+    """Lê o PDF do orçamento do laboratório (Texto ou Imagem) e extrai o valor total bruto."""
     try:
         api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
             "GEMINI_API_KEY"
@@ -53,59 +53,79 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
 
         if not api_key:
             st.error(
-                "API Key do Gemini não configurada. Adicione 'GEMINI_API_KEY'"
-                " nos secrets."
+                "API Key do Gemini não encontrada nos Secrets ou variáveis de"
+                " ambiente."
             )
             return None
 
         genai.configure(api_key=api_key)
 
+        # Reseta o ponteiro de leitura do arquivo no Streamlit
+        arquivo_pdf.seek(0)
+        bytes_pdf = arquivo_pdf.read()
+
+        # 1. Tentativa de extração de texto via PyPDF
+        arquivo_pdf.seek(0)
         reader = PdfReader(arquivo_pdf)
         texto_completo = ""
         for page in reader.pages:
-            texto_extraido = page.extract_text()
-            if texto_extraido:
-                texto_completo += texto_extraido + "\n"
+            t = page.extract_text()
+            if t:
+                texto_completo += t + "\n"
 
-        if not texto_completo.strip():
-            st.error("Não foi possível extrair texto legível do PDF enviado.")
-            return None
-
-        prompt = f"""
-        Você é a inteligência do sistema financeiro da Farmácia Jr. (UFMG). 
-        Analise o texto extraído de um PDF de orçamento de laboratório parceiro e encontre o VALOR TOTAL BRUTO do serviço.
-        Retorne ESTRITAMENTE um JSON no seguinte formato:
-        {{"valor_total": 0.00}}
-
-        Texto do PDF:
-        {texto_completo}
+        prompt = """
+        Você é a inteligência financeira da Farmácia Jr. (UFMG).
+        Analise o documento de orçamento de laboratório anexo e encontre o VALOR TOTAL BRUTO cobrado pelo serviço.
+        Ignore descontos condicionais se houver.
+        Retorne ESTRITAMENTE um JSON no formato:
+        {"valor_total": 0.00}
         """
 
         modelos_testar = [
-            "gemini-1.5-flash-8b",
             "gemini-2.0-flash",
+            "gemini-1.5-flash-8b",
             "gemini-flash-latest",
         ]
         resposta_texto = None
 
-        for m in modelos_testar:
-            try:
-                model = genai.GenerativeModel(m)
-                res = model.generate_content(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.0
-                    ),
-                )
-                if res and res.text:
-                    resposta_texto = res.text.strip()
-                    break
-            except Exception:
-                continue
+        # Se houver texto legível, envia como texto
+        if len(texto_completo.strip()) > 10:
+            prompt_envio = f"{prompt}\n\nTexto do Orçamento:\n{texto_completo}"
+            for m in modelos_testar:
+                try:
+                    model = genai.GenerativeModel(m)
+                    res = model.generate_content(
+                        prompt_envio,
+                        generation_config=genai.types.GenerationConfig(
+                            temperature=0.0
+                        ),
+                    )
+                    if res and res.text:
+                        resposta_texto = res.text.strip()
+                        break
+                except Exception:
+                    continue
+        else:
+            # 2. Se for PDF escaneado (Imagem), envia via multimodal
+            conteudo_multimodal = [
+                prompt,
+                {"mime_type": "application/pdf", "data": bytes_pdf},
+            ]
+            for m in modelos_testar:
+                try:
+                    model = genai.GenerativeModel(m)
+                    res = model.generate_content(conteudo_multimodal)
+                    if res and res.text:
+                        resposta_texto = res.text.strip()
+                        break
+                except Exception:
+                    continue
 
         if not resposta_texto:
+            st.error("O Gemini não retornou resposta para o arquivo enviado.")
             return None
 
+        # Limpeza do JSON retornado pela IA
         if "```" in resposta_texto:
             partes = resposta_texto.split("```")
             for parte in partes:
@@ -117,10 +137,21 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
                     break
 
         dados_ia = json.loads(resposta_texto.strip())
-        return float(dados_ia.get("valor_total", 0.0))
+        valor_raw = dados_ia.get("valor_total", 0.0)
+
+        # Tratamento de string para float caso venha como "1.250,50" ou "R$ 500"
+        if isinstance(valor_raw, str):
+            val_limpo = re.sub(r"[^\d,\.]", "", valor_raw)
+            if "," in val_limpo and "." in val_limpo:
+                val_limpo = val_limpo.replace(".", "").replace(",", ".")
+            elif "," in val_limpo:
+                val_limpo = val_limpo.replace(",", ".")
+            return float(val_limpo)
+
+        return float(valor_raw)
 
     except Exception as e:
-        st.error(f"Erro ao processar o PDF com a IA: {e}")
+        st.error(f"Erro no processamento da leitura do PDF: {e}")
         return None
 
 
@@ -148,10 +179,20 @@ def obter_texto_parcelamento(servico, valor_total):
         return texto_especial
 
     if num_parcelas == 1:
-        return f"À vista (R$ {valor_total:,.2f})".replace(",", "X").replace(".", ",").replace("X", ".")
+        return (
+            f"À vista (R$ {valor_total:,.2f})"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )
     else:
         valor_da_parcela = valor_total / num_parcelas
-        v_parc_str = f"R$ {valor_da_parcela:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        v_parc_str = (
+            f"R$ {valor_da_parcela:,.2f}"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )
         return f"{num_parcelas} parcelas de {v_parc_str}"
 
 
@@ -161,11 +202,19 @@ def definir_borda_celula(cell, **kwargs):
     tcPr = tc.get_or_add_tcPr()
     tcBorders = parse_xml(
         f'<w:tcBorders {nsdecls("w")}>\n'
-        f'<w:top w:val="{kwargs.get("top", "single")}" w:sz="{kwargs.get("sz", "4")}" w:space="0" w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
-        f'<w:left w:val="{kwargs.get("left", "single")}" w:sz="{kwargs.get("sz", "4")}" w:space="0" w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
-        f'<w:bottom w:val="{kwargs.get("bottom", "single")}" w:sz="{kwargs.get("sz", "4")}" w:space="0" w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
-        f'<w:right w:val="{kwargs.get("right", "single")}" w:sz="{kwargs.get("sz", "4")}" w:space="0" w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
-        f'</w:tcBorders>'
+        f'<w:top w:val="{kwargs.get("top", "single")}"'
+        f' w:sz="{kwargs.get("sz", "4")}" w:space="0"'
+        f' w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
+        f'<w:left w:val="{kwargs.get("left", "single")}"'
+        f' w:sz="{kwargs.get("sz", "4")}" w:space="0"'
+        f' w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
+        f'<w:bottom w:val="{kwargs.get("bottom", "single")}"'
+        f' w:sz="{kwargs.get("sz", "4")}" w:space="0"'
+        f' w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
+        f'<w:right w:val="{kwargs.get("right", "single")}"'
+        f' w:sz="{kwargs.get("sz", "4")}" w:space="0"'
+        f' w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
+        f"</w:tcBorders>"
     )
     tcPr.append(tcBorders)
 
@@ -178,7 +227,9 @@ def formatar_tabela_word(tabela, bg_cabecalho="FF1493"):
         for cell in row.cells:
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i == 0:
-                shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{bg_cabecalho}"/>')
+                shading = parse_xml(
+                    f'<w:shd {nsdecls("w")} w:fill="{bg_cabecalho}"/>'
+                )
                 cell._tc.get_or_add_tcPr().append(shading)
                 for p in cell.paragraphs:
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -197,7 +248,6 @@ def gerar_docx_proposta(dados):
     """Gera o arquivo .docx idêntico ao modelo original da Farmácia Jr."""
     doc = docx.Document()
 
-    # Margens padrão A4 (2.54 cm / 1 polegada)
     for section in doc.sections:
         section.top_margin = Inches(1)
         section.bottom_margin = Inches(1)
@@ -212,29 +262,25 @@ def gerar_docx_proposta(dados):
     agora = obter_agora_br()
     data_validade = calcular_data_final_uteis(agora, 15).strftime("%d/%m/%Y")
 
-    # 1. Validade
     p_val = doc.add_paragraph()
     r_val = p_val.add_run(f"Validade precificação: {data_validade}")
     r_val.font.size = Pt(9.5)
     r_val.font.italic = True
     r_val.font.color.rgb = RGBColor(100, 100, 100)
 
-    # 2. Título do Cliente
     p_tit = doc.add_paragraph()
     p_tit.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r_tit = p_tit.add_run(f"Precificação – {dados['nome_lead']}")
     r_tit.bold = True
     r_tit.font.size = Pt(15)
-    r_tit.font.color.rgb = RGBColor(199, 21, 133)  # Magenta
+    r_tit.font.color.rgb = RGBColor(199, 21, 133)
 
-    # 3. Subtítulo Serviço
     p_sub = doc.add_paragraph()
     r_sub = p_sub.add_run(f"{dados['nome_servico'].upper()}")
     r_sub.bold = True
     r_sub.font.size = Pt(12)
 
     if dados["tipo_servico"] == "Serviço Autoral (Farmácia Jr.)":
-        # OPCION 1 - PREÇO CHEIO
         p_op1 = doc.add_paragraph()
         r_op1 = p_op1.add_run("1° opção – Precificação cheia")
         r_op1.bold = True
@@ -248,22 +294,34 @@ def gerar_docx_proposta(dados):
 
         row1 = tbl1.rows[1].cells
         row1[0].text = dados["nome_servico"]
-        row1[1].text = f"R$ {dados['valor_base']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        row1[1].text = (
+            f"R$ {dados['valor_base']:,.2f}"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )
         row1[2].text = str(dados["quantidade"])
-        row1[3].text = f"R$ {dados['total_cheio']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        row1[3].text = (
+            f"R$ {dados['total_cheio']:,.2f}"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )
 
         formatar_tabela_word(tbl1)
 
         doc.add_paragraph(
-            f"Prazo de execução: {dados['prazo']} dias úteis (Previsão de entrega: {dados['data_entrega_autoral']})"
+            f"Prazo de execução: {dados['prazo']} dias úteis (Previsão de"
+            f" entrega: {dados['data_entrega_autoral']})"
         )
         doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_cheio']}")
 
-        doc.add_paragraph()  # Espaçador
+        doc.add_paragraph()
 
-        # OPCION 2 - COM DESCONTO
         p_op2 = doc.add_paragraph()
-        r_op2 = p_op2.add_run(f"2° opção – desconto de acordo [{dados['motivo_desconto']}]")
+        r_op2 = p_op2.add_run(
+            f"2° opção – desconto de acordo [{dados['motivo_desconto']}]"
+        )
         r_op2.bold = True
 
         tbl2 = doc.add_table(rows=2, cols=4)
@@ -274,19 +332,31 @@ def gerar_docx_proposta(dados):
 
         row2 = tbl2.rows[1].cells
         row2[0].text = dados["nome_servico"]
-        row2[1].text = f"R$ {dados['unitario_desconto']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        row2[1].text = (
+            f"R$ {dados['unitario_desconto']:,.2f}"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )
         row2[2].text = str(dados["quantidade"])
-        row2[3].text = f"R$ {dados['total_desconto']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        row2[3].text = (
+            f"R$ {dados['total_desconto']:,.2f}"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )
 
         formatar_tabela_word(tbl2)
 
         doc.add_paragraph(
-            f"Prazo de execução: {dados['prazo']} dias úteis (Previsão de entrega: {dados['data_entrega_autoral']})"
+            f"Prazo de execução: {dados['prazo']} dias úteis (Previsão de"
+            f" entrega: {dados['data_entrega_autoral']})"
         )
-        doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_desconto']}")
+        doc.add_paragraph(
+            f"Formas de pagamento: {dados['parcelas_desconto']}"
+        )
 
     else:
-        # TERCEIRIZADO
         p_op1 = doc.add_paragraph()
         r_op1 = p_op1.add_run("1° opção – Precificação cheia")
         r_op1.bold = True
@@ -300,16 +370,30 @@ def gerar_docx_proposta(dados):
 
         row3 = tbl3.rows[1].cells
         row3[0].text = dados["nome_servico"]
-        row3[1].text = f"R$ {dados['total_terceirizado']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        row3[1].text = (
+            f"R$ {dados['total_terceirizado']:,.2f}"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )
         row3[2].text = "1"
-        row3[3].text = f"R$ {dados['total_terceirizado']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        row3[3].text = (
+            f"R$ {dados['total_terceirizado']:,.2f}"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )
 
         formatar_tabela_word(tbl3)
 
         doc.add_paragraph(
-            f"Prazo de execução: {dados['prazo_terceirizado']} dias corridos (Incluso prazo de segurança. Previsão: {dados['data_entrega_terc']})"
+            f"Prazo de execução: {dados['prazo_terceirizado']} dias corridos"
+            " (Incluso prazo de segurança. Previsão:"
+            f" {dados['data_entrega_terc']})"
         )
-        doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_terceirizado']}")
+        doc.add_paragraph(
+            f"Formas de pagamento: {dados['parcelas_terceirizado']}"
+        )
 
         doc.add_paragraph()
 
@@ -364,7 +448,9 @@ def renderizar_aba_precificacao():
                 "Serviço Autoral:", list(PRECOS_AUTORAIS.keys())
             )
             valor_base = PRECOS_AUTORAIS[nome_servico]
-            st.info(f"💰 Valor de tabela fixado pelo setor: **R$ {valor_base:,.2f}**")
+            st.info(
+                f"💰 Valor de tabela fixado pelo setor: **R$ {valor_base:,.2f}**"
+            )
             quantidade = st.number_input(
                 "Quantidade (Nº de Rótulos / Tabelas / Produtos):",
                 min_value=1,
@@ -380,16 +466,21 @@ def renderizar_aba_precificacao():
             else:
                 prazo = quantidade * 5
 
-            st.info(f"📅 Prazo de execução calculado: **{prazo} dias úteis**")
+            st.info(f"📅 Prazo de execução calculated: **{prazo} dias úteis**")
 
             total_cheio = valor_base * quantidade
-            parcelas_cheio = obter_texto_parcelamento(nome_servico, total_cheio)
+            parcelas_cheio = obter_texto_parcelamento(
+                nome_servico, total_cheio
+            )
             st.info(f"💳 Condição de Pagamento (Cheio): **{parcelas_cheio}**")
 
-        data_entrega = calcular_data_final_uteis(agora, prazo).strftime("%d/%m/%Y")
+        data_entrega = calcular_data_final_uteis(agora, prazo).strftime(
+            "%d/%m/%Y"
+        )
 
         st.markdown(
-            "<h4 style='color: #FF1493;'>🔍 Seleção de Descontos (Limite Máximo de 15%)</h4>",
+            "<h4 style='color: #FF1493;'>🔍 Seleção de Descontos (Limite Máximo"
+            " de 15%)</h4>",
             unsafe_allow_html=True,
         )
 
@@ -406,33 +497,65 @@ def renderizar_aba_precificacao():
 
         soma_descontos = 0
         motivos = []
-        if desc_me: soma_descontos += 2.5; motivos.append("Microempreendedor")
-        if desc_nova: soma_descontos += 2.5; motivos.append("Empresa Nova")
-        if desc_antigo: soma_descontos += 5.0; motivos.append("Cliente Antigo")
-        if desc_novo_cli: soma_descontos += 1.25; motivos.append("Novo Cliente")
-        if desc_mulher: soma_descontos += 1.75; motivos.append("Líderes Mulheres")
-        if desc_combo: soma_descontos += 5.0; motivos.append("Mais de um Serviço")
-        if desc_qtd: soma_descontos += 5.0; motivos.append("Quantidade de Produto")
-        if desc_indica: soma_descontos += 5.0; motivos.append("Indicação")
-        if desc_ufmg: soma_descontos += 2.5; motivos.append("Ex-aluno UFMG")
+        if desc_me:
+            soma_descontos += 2.5
+            motivos.append("Microempreendedor")
+        if desc_nova:
+            soma_descontos += 2.5
+            motivos.append("Empresa Nova")
+        if desc_antigo:
+            soma_descontos += 5.0
+            motivos.append("Cliente Antigo")
+        if desc_novo_cli:
+            soma_descontos += 1.25
+            motivos.append("Novo Cliente")
+        if desc_mulher:
+            soma_descontos += 1.75
+            motivos.append("Líderes Mulheres")
+        if desc_combo:
+            soma_descontos += 5.0
+            motivos.append("Mais de um Serviço")
+        if desc_qtd:
+            soma_descontos += 5.0
+            motivos.append("Quantidade de Produto")
+        if desc_indica:
+            soma_descontos += 5.0
+            motivos.append("Indicação")
+        if desc_ufmg:
+            soma_descontos += 2.5
+            motivos.append("Ex-aluno UFMG")
 
         desconto_final_pct = min(soma_descontos, 15.0)
-        motivo_txt = ", ".join(motivos) if motivos else "Critérios de elegibilidade"
+        motivo_txt = (
+            ", ".join(motivos) if motivos else "Critérios de elegibilidade"
+        )
 
         total_desconto = total_cheio * (1 - (desconto_final_pct / 100))
         unitario_desconto = total_desconto / quantidade
 
-        parcelas_desconto = obter_texto_parcelamento(nome_servico, total_desconto)
+        parcelas_desconto = obter_texto_parcelamento(
+            nome_servico, total_desconto
+        )
 
         st.markdown(
-            f"**Soma dos descontos:** {soma_descontos:.2f}% | **Desconto real aplicado (Limite de 15%):** <span style='color:#FF1493; font-weight:bold;'>{desconto_final_pct:.2f}%</span>",
+            f"**Soma dos descontos:** {soma_descontos:.2f}% | **Desconto real"
+            " aplicado (Limite de 15%):** <span style='color:#FF1493;"
+            f" font-weight:bold;'>{desconto_final_pct:.2f}%</span>",
             unsafe_allow_html=True,
         )
 
         st.markdown("---")
         card1, card2 = st.columns(2)
-        card1.metric("Opção 1: Preço Cheio", f"R$ {total_cheio:,.2f}", f"{parcelas_cheio}")
-        card2.metric("Opção 2: Preço com Desconto", f"R$ {total_desconto:,.2f}", f"{parcelas_desconto}")
+        card1.metric(
+            "Opção 1: Preço Cheio",
+            f"R$ {total_cheio:,.2f}",
+            f"{parcelas_cheio}",
+        )
+        card2.metric(
+            "Opção 2: Preço com Desconto",
+            f"R$ {total_desconto:,.2f}",
+            f"{parcelas_desconto}",
+        )
 
         dados_calculados = {
             "nome_lead": nome_lead,
@@ -452,27 +575,69 @@ def renderizar_aba_precificacao():
 
     else:
         # --- CENÁRIO TERCEIRIZADO ---
-        st.markdown("<h4 style='color: #FF1493;'>📂 Upload do Orçamento do Laboratório</h4>", unsafe_allow_html=True)
-        arquivo_pdf = st.file_uploader("Arraste o arquivo PDF do laboratório parceiro aqui:", type=["pdf"])
+        st.markdown(
+            "<h4 style='color: #FF1493;'>📂 Upload do Orçamento do"
+            " Laboratório</h4>",
+            unsafe_allow_html=True,
+        )
+        arquivo_pdf = st.file_uploader(
+            "Arraste o arquivo PDF do laboratório parceiro aqui:", type=["pdf"]
+        )
 
         orcamento_lab = 0.0
         if arquivo_pdf is not None:
-            with st.spinner("🤖 IA processando o PDF e extraindo o valor cobrado..."):
+            with st.spinner(
+                "🤖 IA processando o PDF e extraindo o valor cobrado..."
+            ):
                 valor_extraido = extrair_valor_pdf_com_ia(arquivo_pdf)
                 if valor_extraido is not None:
                     orcamento_lab = valor_extraido
-                    st.success(f"✅ Processado com sucesso! Valor base do laboratório identificado: **R$ {orcamento_lab:,.2f}**")
+                    st.success(
+                        "✅ Processado com sucesso! Valor base do laboratório"
+                        f" identificado: **R$ {orcamento_lab:,.2f}**"
+                    )
 
         col1, col2 = st.columns(2)
         with col1:
-            nome_servico = st.text_input("Nome do Serviço Laboratorial:", value="Análise Microbiológica de Água")
+            nome_servico = st.text_input(
+                "Nome do Serviço Laboratorial:",
+                value="Análise Microbiológica de Água",
+            )
         with col2:
-            prazo_lab = st.number_input("Prazo original dado pelo laboratório (em dias corridos):", min_value=1, value=7)
-            coleta_opcao = st.radio("Serviço de Coleta:", ["Não oferecido (Amostra por conta do cliente)", "Oferecido pela Farmácia Jr."])
-            valor_coleta = st.number_input("Valor da Coleta (R$):", min_value=0.0, value=0.0) if "Oferecido" in coleta_opcao else 0.0
+            prazo_lab = st.number_input(
+                "Prazo original dado pelo laboratório (em dias corridos):",
+                min_value=1,
+                value=7,
+            )
+            coleta_opcao = st.radio(
+                "Serviço de Coleta:",
+                [
+                    "Não oferecido (Amostra por conta do cliente)",
+                    "Oferecido pela Farmácia Jr.",
+                ],
+            )
+            valor_coleta = (
+                st.number_input(
+                    "Valor da Coleta (R$):", min_value=0.0, value=0.0
+                )
+                if "Oferecido" in coleta_opcao
+                else 0.0
+            )
 
-        parametros = st.text_area("Parâmetros analisados:", value="Presença/Ausência de bactérias do grupo Coliformes Totais e Termotolerantes (E. coli).")
-        metodologia = st.text_area("Metodologia aplicada:", value="Contagem de bactérias heterotróficas conforme padrões laboratoriais.")
+        parametros = st.text_area(
+            "Parâmetros analisados:",
+            value=(
+                "Presença/Ausência de bactérias do grupo Coliformes Totais e"
+                " Termotolerantes (E. coli)."
+            ),
+        )
+        metodologia = st.text_area(
+            "Metodologia aplicada:",
+            value=(
+                "Contagem de bactérias heterotróficas conforme padrões"
+                " laboratoriais."
+            ),
+        )
 
         margem_fixa_setor = 110.00
         subtotal_terc = orcamento_lab + margem_fixa_setor
@@ -480,20 +645,37 @@ def renderizar_aba_precificacao():
         total_terceirizado = subtotal_terc + taxas_de_nota
 
         prazo_final_terc = int(round(prazo_lab + 20, 0))
-        data_entrega_terc = (agora + timedelta(days=prazo_final_terc)).strftime("%d/%m/%Y")
+        data_entrega_terc = (agora + timedelta(days=prazo_final_terc)).strftime(
+            "%d/%m/%Y"
+        )
 
-        parcelas_terceirizado = obter_texto_parcelamento("Tabela Nutricional", total_terceirizado)
+        parcelas_terceirizado = obter_texto_parcelamento(
+            "Tabela Nutricional", total_terceirizado
+        )
 
         txt_coleta = (
             f"R$ {valor_coleta:,.2f}"
             if "Oferecido" in coleta_opcao
-            else "não é oferecido o serviço de coleta ficando a critério do cliente a disponibilização da amostra."
+            else (
+                "não é oferecido o serviço de coleta ficando a critério do"
+                " cliente a disponibilização da amostra."
+            )
         )
 
         st.markdown("---")
-        st.metric("Opção Única Terceirizada (Cálculo Automático)", f"R$ {total_terceirizado:,.2f}", f"Prazo com segurança: {prazo_final_terc} dias corridos")
-        st.info(f"💳 Condição de Pagamento Calculada: **{parcelas_terceirizado}**")
-        st.info(f"📅 Previsão exata de entrega para o cliente final: **{data_entrega_terc}**")
+        st.metric(
+            "Opção Única Terceirizada (Cálculo Automático)",
+            f"R$ {total_terceirizado:,.2f}",
+            f"Prazo com segurança: {prazo_final_terc} dias corridos",
+        )
+        st.info(
+            "💳 Condição de Pagamento Calculada:"
+            f" **{parcelas_terceirizado}**"
+        )
+        st.info(
+            "📅 Previsão exata de entrega para o cliente final:"
+            f" **{data_entrega_terc}**"
+        )
 
         dados_calculados = {
             "nome_lead": nome_lead,
@@ -512,11 +694,18 @@ def renderizar_aba_precificacao():
         st.markdown("---")
         arquivo_word = gerar_docx_proposta(dados_calculados)
         st.download_button(
-            label="📥 Gerar e Baixar Documento de Precificação Oficial (.docx)",
+            label=(
+                "📥 Gerar e Baixar Documento de Precificação Oficial (.docx)"
+            ),
             data=arquivo_word,
             file_name=f"Precificação - {nome_lead}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            mime=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
             use_container_width=True,
         )
     else:
-        st.warning("⚠️ Insira o nome do Lead no início da página para habilitar a geração do documento Word.")
+        st.warning(
+            "⚠️ Insira o nome do Lead no início da página para habilitar a"
+            " geração do documento Word."
+        )
