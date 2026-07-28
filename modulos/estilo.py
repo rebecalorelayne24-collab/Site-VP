@@ -1,31 +1,27 @@
 """
 Sistema de design compartilhado da Plataforma VP — Farmácia Jr.
-Importe deste módulo em qualquer página para manter a identidade visual consistente.
 """
-import textwrap
 import streamlit as st
 
 # =======================================================================
 # 🎨 TOKENS DE DESIGN
 # =======================================================================
-INK = "#0B3D3A"        # texto principal / títulos
-MIST = "#F4F9F7"       # fundo suave
-VERDANT = "#1F8F5B"    # receitas / positivo
-CORAL = "#E8623F"      # despesas / negativo
-SAGE = "#8FBFA8"       # apoio / secundário
-CLOUD = "#FFFFFF"      # fundo dos cards
-BORDER = "#E2ECE8"     # bordas sutis
-SLATE = "#5B7A72"      # texto secundário / labels
+INK = "#0B3D3A"
+MIST = "#F4F9F7"
+VERDANT = "#1F8F5B"
+CORAL = "#E8623F"
+SAGE = "#8FBFA8"
+CLOUD = "#FFFFFF"
+BORDER = "#E2ECE8"
+SLATE = "#5B7A72"
 
 
-def _css():
-    raw_css = f"""
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+def injetar_estilos():
+    """Injeta o CSS global diretamente na página sem passar por formatadores de markdown."""
+    css_code = f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
-    /* -------- Header de página -------- */
     .fj-header {{
         display: flex; align-items: center; gap: 14px; margin-bottom: 2px;
     }}
@@ -47,8 +43,6 @@ def _css():
         background: linear-gradient(90deg, {VERDANT} 0%, {SAGE} 45%, {CORAL} 100%);
         margin: 18px 0 22px 0; opacity: 0.85;
     }}
-
-    /* -------- Eyebrow / título de seção -------- */
     .fj-eyebrow {{
         font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600;
         letter-spacing: 0.10em; text-transform: uppercase; color: {SAGE}; margin-bottom: 2px;
@@ -57,8 +51,6 @@ def _css():
         font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600;
         color: {INK}; margin: 0 0 14px 0;
     }}
-
-    /* -------- Metric cards -------- */
     .fj-card {{
         background: {CLOUD}; border-radius: 16px; border: 1px solid {BORDER};
         padding: 20px 22px 18px 22px; position: relative; overflow: hidden;
@@ -83,20 +75,14 @@ def _css():
     .fj-card-sub {{
         font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; font-weight: 600; margin-top: 6px;
     }}
-
-    /* -------- Chart / content cards -------- */
     .fj-chart-card {{
         background: {CLOUD}; border-radius: 16px; border: 1px solid {BORDER};
         padding: 18px 20px 6px 20px; box-shadow: 0 2px 10px rgba(11,61,58,0.05);
     }}
-
-    /* -------- Filter bar -------- */
     .fj-filter-bar {{
         background: {MIST}; border: 1px solid {BORDER}; border-radius: 14px;
         padding: 14px 18px 4px 18px; margin-bottom: 18px;
     }}
-
-    /* -------- List rows (lançamentos) -------- */
     .fj-list-row {{
         background: {CLOUD}; border: 1px solid {BORDER}; border-radius: 12px;
         padding: 12px 16px; margin-bottom: 8px;
@@ -122,8 +108,6 @@ def _css():
     .fj-value {{
         font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 14px; color: {INK};
     }}
-
-    /* Ajustes finos em widgets nativos do Streamlit */
     div[data-testid="stSelectbox"] label, div[data-testid="stRadio"] label,
     div[data-testid="stTextInput"] label, div[data-testid="stNumberInput"] label,
     div[data-testid="stDateInput"] label {{
@@ -132,68 +116,28 @@ def _css():
     }}
     </style>
     """
-    # textwrap.dedent remove qualquer indentação/recuo que faz o Markdown virar caixa de texto
-    return textwrap.dedent(raw_css)
-
-
-def injetar_estilos():
-    """Injeta o sistema de design sem sofrer interferência de recuos ou cache."""
-    st.markdown(_css(), unsafe_allow_html=True)
+    st.components.v1.html(css_code, height=0, width=0)
+    st.markdown(css_code, unsafe_allow_html=True)
 
 
 def page_header(icon, title, caption):
-    """Cabeçalho padrão de página com ícone, título e divisor gradiente."""
-    html = textwrap.dedent(
-        f"""
-        <div class="fj-header">
-            <div class="fj-header-icon">{icon}</div>
-            <div>
-                <p class="fj-header-title">{title}</p>
-                <p class="fj-header-caption">{caption}</p>
-            </div>
-        </div>
-        <div class="fj-divider"></div>
-        """
-    )
-    st.markdown(html, unsafe_allow_html=True)
+    html_str = f"""<div class="fj-header"><div class="fj-header-icon">{icon}</div><div><p class="fj-header-title">{title}</p><p class="fj-header-caption">{caption}</p></div></div><div class="fj-divider"></div>"""
+    st.markdown(html_str, unsafe_allow_html=True)
 
 
 def section_header(eyebrow, title):
-    """Eyebrow + título de seção, no padrão do sistema de design."""
-    html = textwrap.dedent(
-        f"""
-        <div class="fj-eyebrow">{eyebrow}</div>
-        <p class="fj-section-title">{title}</p>
-        """
-    )
-    st.markdown(html, unsafe_allow_html=True)
+    html_str = f"""<div class="fj-eyebrow">{eyebrow}</div><p class="fj-section-title">{title}</p>"""
+    st.markdown(html_str, unsafe_allow_html=True)
 
 
 def metric_card(col, label, icon, icon_bg, value_str, accent_gradient, sub_text=None, sub_color=None):
-    """Renderiza um card de métrica no estilo do sistema de design."""
-    sub_html = ""
-    if sub_text:
-        sub_html = f'<div class="fj-card-sub" style="color:{sub_color};">{sub_text}</div>'
-
-    html = textwrap.dedent(
-        f"""
-        <div class="fj-card">
-            <div style="position:absolute; top:0; left:0; right:0; height:4px; background:{accent_gradient};"></div>
-            <div class="fj-card-label">
-                <span class="fj-icon-badge" style="background:{icon_bg};">{icon}</span>
-                {label}
-            </div>
-            <div class="fj-card-value">{value_str}</div>
-            {sub_html}
-        </div>
-        """
-    )
-    col.markdown(html, unsafe_allow_html=True)
+    sub_html = f"""<div class="fj-card-sub" style="color:{sub_color};">{sub_text}</div>""" if sub_text else ""
+    html_str = f"""<div class="fj-card"><div style="position:absolute; top:0; left:0; right:0; height:4px; background:{accent_gradient};"></div><div class="fj-card-label"><span class="fj-icon-badge" style="background:{icon_bg};">{icon}</span>{label}</div><div class="fj-card-value">{value_str}</div>{sub_html}</div>"""
+    col.markdown(html_str, unsafe_allow_html=True)
 
 
 def pill(text, color):
-    """Pequeno badge arredondado (ex: status de pagamento, nota fiscal)."""
-    return f'<span class="fj-pill" style="background:{color}22; color:{color};">{text}</span>'
+    return f"""<span class="fj-pill" style="background:{color}22; color:{color};">{text}</span>"""
 
 
 def formatar_moeda(valor):
