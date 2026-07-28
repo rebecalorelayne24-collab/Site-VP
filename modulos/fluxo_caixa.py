@@ -87,7 +87,7 @@ def salvar_lancamento(
 
 
 def ler_extrato_com_gemini(texto_pdf):
-    """Envia o texto do extrato para o Gemini mapear os dados em JSON com fallback automático entre modelos."""
+    """Envia o texto do extrato priorizando os modelos de alta cota diária (1.500 RPD)."""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
     if not api_key:
@@ -122,17 +122,17 @@ def ler_extrato_com_gemini(texto_pdf):
         {texto_pdf}
         """
 
-        # Rotação inteligente de modelos para evitar erros 429 de cota excedida
-        modelos_para_tentar = [
-            "gemini-2.5-flash",
+        # Prioriza modelos com limite de 1.500 chamadas/dia
+        modelos_alta_cota = [
+            "gemini-1.5-flash",
             "gemini-2.0-flash",
             "gemini-1.5-flash-8b",
-            "gemini-1.5-flash",
+            "gemini-2.5-flash",
         ]
 
         resposta_texto = None
 
-        for nome_modelo in modelos_para_tentar:
+        for nome_modelo in modelos_alta_cota:
             try:
                 model = genai.GenerativeModel(
                     nome_modelo,
@@ -143,7 +143,7 @@ def ler_extrato_com_gemini(texto_pdf):
                     resposta_texto = response.text.strip()
                     break
             except Exception:
-                # Tenta sem o argumento de mime_type caso não seja suportado pela versão
+                # Tenta sem o parâmetro mime_type
                 try:
                     model = genai.GenerativeModel(nome_modelo)
                     response = model.generate_content(prompt)
@@ -154,10 +154,9 @@ def ler_extrato_com_gemini(texto_pdf):
                     continue
 
         if not resposta_texto:
-            st.error("⚠️ Limite diário de requisições excedido em todos os modelos do Gemini. Aguarde alguns instantes e tente novamente.")
+            st.error("⚠️ Não foi possível obter resposta da IA. Verifique sua API Key ou tente novamente em alguns instantes.")
             return []
 
-        # Limpeza caso o modelo inclua formatação Markdown extra
         if "```" in resposta_texto:
             resposta_texto = resposta_texto.split("```")[1]
             if resposta_texto.startswith("json"):
