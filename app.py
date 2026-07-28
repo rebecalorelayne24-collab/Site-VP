@@ -5,14 +5,11 @@ import streamlit as st
 import google.generativeai as genai
 
 # --- CONFIGURAÇÃO SEGURA DA API DO GEMINI ---
-# Busca a chave configurada privadamente nos Secrets do Streamlit Cloud
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
 if api_key:
     os.environ["GEMINI_API_KEY"] = api_key
     genai.configure(api_key=api_key)
-else:
-    st.warning("⚠️ Chave da API do Gemini não configurada nos Secrets do Streamlit Cloud.")
 
 # --- IMPORTAÇÕES DOS MÓDULOS INTERNOS ---
 from database.conexao_db import inicializar_banco_dados
@@ -39,7 +36,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- DESIGN SYSTEM EXCLUSIVO (UI/UX VP FARMÁCIA JR.) ---
+# --- DESIGN SYSTEM EXCLUSIVO (UI/UX AJUSTADO & CONTRASTE PERFEITO) ---
 st.markdown(
     """
     <style>
@@ -57,7 +54,7 @@ st.markdown(
             box-shadow: 2px 0 12px rgba(0,0,0,0.05);
         }
 
-        /* Textos, títulos e rótulos da Sidebar em branco/rosa claro */
+        /* Textos e títulos da Sidebar */
         [data-testid="stSidebar"] *, 
         [data-testid="stSidebar"] label, 
         [data-testid="stSidebar"] span,
@@ -89,23 +86,28 @@ st.markdown(
             box-shadow: 0 4px 10px rgba(230, 0, 126, 0.3) !important;
         }
 
-        /* 3. CAMPOS DE ENTRADA (INPUTS DE TEXTO E SENHA) */
+        /* 3. CAMPOS DE ENTRADA (CORREÇÃO DE FUNDO BRANCO E TEXTO ESCURO) */
+        div[data-baseweb="input"] {
+            background-color: #FFFFFF !important;
+            border-radius: 8px !important;
+        }
+
         div[data-baseweb="input"] > div {
             background-color: #FFFFFF !important;
             border: 1.5px solid #CED4DA !important;
             border-radius: 8px !important;
             color: #212529 !important;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important;
+        }
+
+        div[data-baseweb="input"] input {
+            color: #212529 !important;
+            background-color: #FFFFFF !important;
+            -webkit-text-fill-color: #212529 !important;
         }
 
         div[data-baseweb="input"] > div:focus-within {
             border-color: #E6007E !important;
             box-shadow: 0 0 0 3px rgba(230, 0, 126, 0.15) !important;
-        }
-
-        input {
-            color: #212529 !important;
-            background-color: transparent !important;
         }
 
         /* 4. BOTÕES PRINCIPAIS */
@@ -127,7 +129,7 @@ st.markdown(
             transform: translateY(-1px);
         }
 
-        /* 5. TÍTULOS E CARTÕES DA TELA PRINCIPAL */
+        /* 5. TÍTULOS DA TELA PRINCIPAL */
         h1, h2, h3 {
             color: #2D0B1C !important;
             font-weight: 700 !important;
@@ -138,12 +140,7 @@ st.markdown(
             color: #6C757D !important;
         }
 
-        /* Card container para login e formulários */
-        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div.element-container {
-            border-radius: 12px;
-        }
-
-        /* Ajuste das abas (Tabs) */
+        /* Abas superiors (Tabs) */
         button[data-baseweb="tab"] {
             color: #495057 !important;
             font-weight: 600 !important;
@@ -229,8 +226,10 @@ elif st.session_state.logado and st.session_state.primeiro_login == 1:
         "SELECT primeiro_login FROM usuarios WHERE email = ?",
         (st.session_state.email_usuario,),
     )
-    status_atual = cursor.fetchone()[0]
+    resultado = cursor.fetchone()
     conn.close()
+
+    status_atual = resultado[0] if resultado else 0
 
     if status_atual == 1:
         renderizar_tela_troca_senha(st.session_state.email_usuario)
