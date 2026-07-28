@@ -73,7 +73,7 @@ def renderizar_dashboard_geral():
         df["categoria"] = "Sem Categoria"
 
     # =======================================================================
-    # 🎛️ FILTROS ESTRATÉGICOS (MÊS E STATUS)
+    # 🎛️ FILTROS ESTRATÉGICOS
     # =======================================================================
     meses_ordem = [
         "Todos", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -99,7 +99,7 @@ def renderizar_dashboard_geral():
     st.markdown("---")
 
     # =======================================================================
-    # 1. MÉTRICAS CHAVE (CARDS EXECUTIVOS COM BORDAS COLORIDAS)
+    # 1. MÉTRICAS CHAVE (CARDS COM CONTRASTE VISÍVEL)
     # =======================================================================
     receitas = df_filtrado[df_filtrado["tipo"] == "Receita"]["valor_liquido"].sum()
     despesas = df_filtrado[df_filtrado["tipo"] == "Despesa"]["valor_liquido"].sum()
@@ -110,9 +110,9 @@ def renderizar_dashboard_geral():
 
     m1.markdown(
         f"""
-        <div style="background-color: #F8F9FA; border-left: 5px solid #2E7D32; border-radius: 8px; padding: 15px; text-align: center;">
-            <span style="color: #555; font-size: 12px; font-weight: bold; text-transform: uppercase;">📥 Faturamento (Receitas)</span>
-            <h3 style="color: #2E7D32; margin: 6px 0 0 0;">R$ {receitas:,.2f}</h3>
+        <div style="background-color: #F3F4F6; border-left: 5px solid #2E7D32; border-radius: 8px; padding: 15px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <span style="color: #374151; font-size: 12px; font-weight: bold; text-transform: uppercase;">📥 Faturamento (Receitas)</span>
+            <h3 style="color: #2E7D32; margin: 6px 0 0 0; font-weight: 800;">R$ {receitas:,.2f}</h3>
         </div>
         """.replace(",", "X").replace(".", ",").replace("X", "."),
         unsafe_allow_html=True,
@@ -120,9 +120,9 @@ def renderizar_dashboard_geral():
 
     m2.markdown(
         f"""
-        <div style="background-color: #F8F9FA; border-left: 5px solid #C62828; border-radius: 8px; padding: 15px; text-align: center;">
-            <span style="color: #555; font-size: 12px; font-weight: bold; text-transform: uppercase;">📤 Despesas Acumuladas</span>
-            <h3 style="color: #C62828; margin: 6px 0 0 0;">R$ {despesas:,.2f}</h3>
+        <div style="background-color: #F3F4F6; border-left: 5px solid #C62828; border-radius: 8px; padding: 15px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <span style="color: #374151; font-size: 12px; font-weight: bold; text-transform: uppercase;">📤 Despesas Acumuladas</span>
+            <h3 style="color: #C62828; margin: 6px 0 0 0; font-weight: 800;">R$ {despesas:,.2f}</h3>
         </div>
         """.replace(",", "X").replace(".", ",").replace("X", "."),
         unsafe_allow_html=True,
@@ -131,10 +131,10 @@ def renderizar_dashboard_geral():
     cor_saldo = "#2E7D32" if saldo >= 0 else "#C62828"
     m3.markdown(
         f"""
-        <div style="background-color: #F8F9FA; border-left: 5px solid {cor_saldo}; border-radius: 8px; padding: 15px; text-align: center;">
-            <span style="color: #555; font-size: 12px; font-weight: bold; text-transform: uppercase;">⚖️ Saldo em Caixa</span>
-            <h3 style="color: {cor_saldo}; margin: 6px 0 0 0;">R$ {saldo:,.2f}</h3>
-            <span style="color: {cor_saldo}; font-size: 11px; font-weight: bold;">{margem:.1f}% Margem Operacional</span>
+        <div style="background-color: #F3F4F6; border-left: 5px solid {cor_saldo}; border-radius: 8px; padding: 15px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <span style="color: #374151; font-size: 12px; font-weight: bold; text-transform: uppercase;">⚖️ Saldo em Caixa</span>
+            <h3 style="color: {cor_saldo}; margin: 6px 0 0 0; font-weight: 800;">R$ {saldo:,.2f}</h3>
+            <span style="color: {cor_saldo}; font-size: 12px; font-weight: bold;">{margem:.1f}% Margem Operacional</span>
         </div>
         """.replace(",", "X").replace(".", ",").replace("X", "."),
         unsafe_allow_html=True,
@@ -142,16 +142,23 @@ def renderizar_dashboard_geral():
 
     st.markdown("---")
 
+    # Configuração de Estilo Global de Cores para os Gráficos Plotly
+    estilo_layout_grafico = dict(
+        margin=dict(l=20, r=20, t=20, b=20),
+        font=dict(color="#1F2937", size=12),  # Garante texto escuro legível no fundo claro
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+
     # =======================================================================
     # 2. GRÁFICOS: EVOLUÇÃO E PIZZA DE CATEGORIAS
     # =======================================================================
     col_esq, col_dir = st.columns(2)
 
     with col_esq:
-        st.markdown("#### 📈 Evolução Mensal (Receitas vs Despesas)")
+        st.markdown("<h4 style='color: #111827;'>📈 Evolução Mensal (Receitas vs Despesas)</h4>", unsafe_allow_html=True)
         df_mensal = df_filtrado.groupby(["mes", "tipo"])["valor_liquido"].sum().reset_index()
 
-        # Ordenação Cronológica Estrita
         df_mensal["mes"] = pd.Categorical(df_mensal["mes"], categories=meses_ordem[1:], ordered=True)
         df_mensal = df_mensal.sort_values("mes")
 
@@ -166,13 +173,13 @@ def renderizar_dashboard_geral():
                 template="plotly_white",
                 labels={"valor_liquido": "Valor (R$)", "mes": "Mês", "tipo": "Tipo"},
             )
-            fig_evolucao.update_layout(margin=dict(l=20, r=20, t=20, b=20), legend_title_text="")
+            fig_evolucao.update_layout(**estilo_layout_grafico, legend_title_text="")
             st.plotly_chart(fig_evolucao, use_container_width=True)
         else:
             st.caption("Sem dados suficientes para o período selecionado.")
 
     with col_dir:
-        st.markdown("#### 🍕 Fontes de Receita por Categoria")
+        st.markdown("<h4 style='color: #111827;'>🍕 Fontes de Receita por Categoria</h4>", unsafe_allow_html=True)
         df_rec = df_filtrado[df_filtrado["tipo"] == "Receita"]
         if not df_rec.empty:
             fig_pizza = px.pie(
@@ -182,7 +189,7 @@ def renderizar_dashboard_geral():
                 color_discrete_sequence=px.colors.qualitative.Pastel,
                 hole=0.4,
             )
-            fig_pizza.update_layout(margin=dict(l=20, r=20, t=20, b=20))
+            fig_pizza.update_layout(**estilo_layout_grafico)
             st.plotly_chart(fig_pizza, use_container_width=True)
         else:
             st.caption("Nenhuma receita registrada no filtro selecionado.")
@@ -192,7 +199,7 @@ def renderizar_dashboard_geral():
     # =======================================================================
     # 3. GRÁFICO: DESPESAS POR DIRETORIA
     # =======================================================================
-    st.markdown("#### 🏢 Distribuição de Despesas por Diretoria")
+    st.markdown("<h4 style='color: #111827;'>🏢 Distribuição de Despesas por Diretoria</h4>", unsafe_allow_html=True)
     df_desp = df_filtrado[df_filtrado["tipo"] == "Despesa"]
 
     if not df_desp.empty:
@@ -210,7 +217,7 @@ def renderizar_dashboard_geral():
                 "categoria": "Categoria",
             },
         )
-        fig_barras.update_layout(margin=dict(l=20, r=20, t=20, b=20))
+        fig_barras.update_layout(**estilo_layout_grafico)
         st.plotly_chart(fig_barras, use_container_width=True)
     else:
         st.caption("Nenhuma despesa registrada para exibir o gráfico de barras.")
