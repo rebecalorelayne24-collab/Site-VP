@@ -42,8 +42,32 @@ def calcular_data_final_uteis(data_inicial, dias_uteis):
     return data_atual
 
 
+def extrair_valor_por_regex(texto):
+    """Procura padrões de valores em R$ no texto do PDF como fallback."""
+    padroes = [
+        r"(?:total|valor total|total a pagar|subtotal|valor)[\s\:\=]*r\$\s*([\d\.\,]+)",
+        r"r\$\s*([\d\.\,]+)",
+    ]
+    for padrao in padroes:
+        matches = re.findall(padrao, texto, re.IGNORECASE)
+        for match in matches:
+            val_str = match.strip()
+            # Converte formato brasileiro (1.250,50) para float (1250.50)
+            if "," in val_str and "." in val_str:
+                val_str = val_str.replace(".", "").replace(",", ".")
+            elif "," in val_str:
+                val_str = val_str.replace(",", ".")
+            try:
+                val_num = float(val_str)
+                if val_num > 0:
+                    return val_num
+            except ValueError:
+                continue
+    return None
+
+
 def extrair_valor_pdf_com_ia(arquivo_pdf):
-    """Lê o PDF do orçamento do laboratório (Texto ou Imagem) e extrai o valor total bruto."""
+    """Lê o PDF do orçamento do laboratório e extrai o valor bruto via Gemini e Regex."""
     try:
         api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
             "GEMINI_API_KEY"
@@ -52,19 +76,12 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
             api_key = str(api_key).strip().strip('"').strip("'")
 
         if not api_key:
-            st.error(
-                "API Key do Gemini não encontrada nos Secrets ou variáveis de"
-                " ambiente."
+            st.warning(
+                "⚠️ API Key do Gemini não configurada nos Secrets. Usando"
+                " leitura direta por OCR/Regex."
             )
-            return None
 
-        genai.configure(api_key=api_key)
-
-        # Reseta o ponteiro de leitura do arquivo no Streamlit
-        arquivo_pdf.seek(0)
-        bytes_pdf = arquivo_pdf.read()
-
-        # 1. Tentativa de extração de texto via PyPDF
+        # 1. Extrai o texto do PDF via PyPDF
         arquivo_pdf.seek(0)
         reader = PdfReader(arquivo_pdf)
         texto_completo = ""
@@ -73,85 +90,64 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
             if t:
                 texto_completo += t + "\n"
 
-        prompt = """
-        Você é a inteligência financeira da Farmácia Jr. (UFMG).
-        Analise o documento de orçamento de laboratório anexo e encontre o VALOR TOTAL BRUTO cobrado pelo serviço.
-        Ignore descontos condicionais se houver.
-        Retorne ESTRITAMENTE um JSON no formato:
-        {"valor_total": 0.00}
-        """
+        texto_limpo = texto_completo.strip()
 
-        modelos_testar = [
-            "gemini-2.0-flash",
-            "gemini-1.5-flash-8b",
-            "gemini-flash-latest",
-        ]
-        resposta_texto = None
+        # 2. Se houver API Key e texto, tenta o processamento cognitivo com o Gemini
+        if api_key and len(texto_limpo) > 10:
+            try:
+                genai.configure(api_key=api_key)
 
-        # Se houver texto legível, envia como texto
-        if len(texto_completo.strip()) > 10:
-            prompt_envio = f"{prompt}\n\nTexto do Orçamento:\n{texto_completo}"
-            for m in modelos_testar:
-                try:
-                    model = genai.GenerativeModel(m)
-                    res = model.generate_content(
-                        prompt_envio,
-                        generation_config=genai.types.GenerationConfig(
-                            temperature=0.0
-                        ),
-                    )
-                    if res and res.text:
-                        resposta_texto = res.text.strip()
-                        break
-                except Exception:
-                    continue
-        else:
-            # 2. Se for PDF escaneado (Imagem), envia via multimodal
-            conteudo_multimodal = [
-                prompt,
-                {"mime_type": "application/pdf", "data": bytes_pdf},
-            ]
-            for m in modelos_testar:
-                try:
-                    model = genai.GenerativeModel(m)
-                    res = model.generate_content(conteudo_multimodal)
-                    if res and res.text:
-                        resposta_texto = res.text.strip()
-                        break
-                except Exception:
-                    continue
+                prompt = f"""
+                Você é o assistente financeiro da Farmácia Jr. (UFMG).
+                Analise o texto do orçamento bancário/laboratorial abaixo e extraia o VALOR TOTAL BRUTO cobrado.
+                Retorne ESTRITAMENTE um JSON no seguinte formato:
+                {{"valor_total": 0.00}}
 
-        if not resposta_texto:
-            st.error("O Gemini não retornou resposta para o arquivo enviado.")
-            return None
+                Texto do Orçamento:
+                {texto_limpo}
+                """
 
-        # Limpeza do JSON retornado pela IA
-        if "```" in resposta_texto:
-            partes = resposta_texto.split("```")
-            for parte in partes:
-                parte_limpa = parte.strip()
-                if parte_limpa.startswith("json"):
-                    parte_limpa = parte_limpa[4:].strip()
-                if parte_limpa.startswith("{") and parte_limpa.endswith("}"):
-                    resposta_texto = parte_limpa
-                    break
+                modelos_testar = [
+                    "gemini-1.5-flash",
+                    "gemini-2.0-flash",
+                    "gemini-flash-latest",
+                ]
+                for m in modelos_testar:
+                    try:
+                        model = genai.GenerativeModel(m)
+                        res = model.generate_content(
+                            prompt,
+                            generation_config=genai.types.GenerationConfig(
+                                temperature=0.0
+                            ),
+                        )
+                        if res and res.text:
+                            resp_txt = res.text.strip()
+                            if "```" in resp_txt:
+                                resp_txt = (
+                                    resp_txt.split("```")[1]
+                                    .replace("json", "")
+                                    .strip()
+                                )
+                            dados_json = json.loads(resp_txt)
+                            v = float(dados_json.get("valor_total", 0.0))
+                            if v > 0:
+                                return v
+                    except Exception:
+                        continue
+            except Exception as e_ia:
+                st.caption(f"Leitura via IA falhou, tentando Regex: {e_ia}")
 
-        dados_ia = json.loads(resposta_texto.strip())
-        valor_raw = dados_ia.get("valor_total", 0.0)
+        # 3. Fallback inteligente via Regex se a IA não retornar ou se o texto for puramente textual
+        if len(texto_limpo) > 0:
+            val_regex = extrair_valor_por_regex(texto_limpo)
+            if val_regex:
+                return val_regex
 
-        # Tratamento de string para float caso venha como "1.250,50" ou "R$ 500"
-        if isinstance(valor_raw, str):
-            val_limpo = re.sub(r"[^\d,\.]", "", valor_raw)
-            if "," in val_limpo and "." in val_limpo:
-                val_limpo = val_limpo.replace(".", "").replace(",", ".")
-            elif "," in val_limpo:
-                val_limpo = val_limpo.replace(",", ".")
-            return float(val_limpo)
-
-        return float(valor_raw)
+        return None
 
     except Exception as e:
-        st.error(f"Erro no processamento da leitura do PDF: {e}")
+        st.error(f"Erro ao ler arquivo PDF: {e}")
         return None
 
 
@@ -466,7 +462,7 @@ def renderizar_aba_precificacao():
             else:
                 prazo = quantidade * 5
 
-            st.info(f"📅 Prazo de execução calculated: **{prazo} dias úteis**")
+            st.info(f"📅 Prazo de execução calculado: **{prazo} dias úteis**")
 
             total_cheio = valor_base * quantidade
             parcelas_cheio = obter_texto_parcelamento(
@@ -584,18 +580,32 @@ def renderizar_aba_precificacao():
             "Arraste o arquivo PDF do laboratório parceiro aqui:", type=["pdf"]
         )
 
-        orcamento_lab = 0.0
+        orcamento_lab_val = 0.0
+
         if arquivo_pdf is not None:
             with st.spinner(
-                "🤖 IA processando o PDF e extraindo o valor cobrado..."
+                "🤖 IA e Leitores de Orçamento processando o PDF..."
             ):
                 valor_extraido = extrair_valor_pdf_com_ia(arquivo_pdf)
-                if valor_extraido is not None:
-                    orcamento_lab = valor_extraido
+                if valor_extraido is not None and valor_extraido > 0:
+                    orcamento_lab_val = valor_extraido
                     st.success(
-                        "✅ Processado com sucesso! Valor base do laboratório"
-                        f" identificado: **R$ {orcamento_lab:,.2f}**"
+                        "✅ Processado com sucesso! Valor do laboratório"
+                        f" identificado: **R$ {orcamento_lab_val:,.2f}**"
                     )
+                else:
+                    st.info(
+                        "💡 Não conseguimos extrair o valor automaticamente."
+                        " Digite o valor no campo abaixo:"
+                    )
+
+        # Campo numérico ajustável que garante que você possa digitar manualmente mesmo se a leitura automática falhar
+        orcamento_lab = st.number_input(
+            "Valor do Orçamento do Laboratório (R$):",
+            min_value=0.0,
+            value=float(orcamento_lab_val),
+            step=50.0,
+        )
 
         col1, col2 = st.columns(2)
         with col1:
