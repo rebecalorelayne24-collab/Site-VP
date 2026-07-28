@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import google.generativeai as genai
 import pandas as pd
@@ -10,6 +11,12 @@ from pypdf import PdfReader
 import streamlit as st
 
 DB_PATH = "database/financeiro_v2.db"
+FUSO_BR = ZoneInfo("America/Sao_Paulo")
+
+
+def obter_agora_br():
+    """Retorna o datetime atual no fuso horário oficial de Brasília."""
+    return datetime.now(FUSO_BR)
 
 
 def garantir_colunas_documentacao():
@@ -195,28 +202,102 @@ def ler_extrato_com_gemini(texto_pdf):
 
 
 def gerar_excel_estilizado(df_export):
+    """Gera um Relatório Financeiro Executivo de Nível ERP no Excel (XlsxWriter)."""
     buffer = io.BytesIO()
 
-    colunas_renomeadas = {
-        "id": "ID", "mes": "Mês", "data": "Data", "departamento": "Diretoria", "tipo": "Tipo",
-        "categoria": "Categoria", "descricao": "Descrição da Operação", "valor_bruto": "Valor Bruto",
-        "taxa": "Taxas", "valor_liquido": "Valor Líquido", "conta_origem": "Conta Bancária",
-        "status_pagamento": "Status Pagamento", "nota_fiscal": "Nota Fiscal", "status_onvio": "Status Contábil",
-    }
+    # Cálculos prévios para o Dashboard
+    df_calc = df_export.copy()
+    if not df_calc.empty:
+        df_calc["valor_liquido"] = pd.to_numeric(df_calc["valor_liquido"], errors="coerce").fillna(0.0)
+        tot_receitas = df_calc[df_calc["tipo"] == "Receita"]["valor_liquido"].sum()
+        tot_despesas = df_calc[df_calc["tipo"] == "Despesa"]["valor_liquido"].sum()
+        saldo_liquido = tot_receitas - tot_despesas
+        qtd_lancamentos = len(df_calc)
+        ticket_medio = (tot_receitas / len(df_calc[df_calc["tipo"] == "Receita"])) if len(df_calc[df_calc["tipo"] == "Receita"]) > 0 else 0.0
+        margem_op = (saldo_liquido / tot_receitas * 100) if tot_receitas > 0 else 0.0
+    else:
+        tot_receitas = tot_despesas = saldo_liquido = ticket_medio = margem_op = 0.0
+        qtd_lancamentos = 0
 
-    df_formatado = df_export.copy()
-    cols_existentes = [c for c in colunas_renomeadas.keys() if c in df_formatado.columns]
-    df_formatado = df_formatado[cols_existentes].rename(columns=colunas_renomeadas)
+    agora = obter_agora_br()
+
+    # Análise Financeira Automática
+    if saldo_liquido > 0:
+        analise_texto = f"🟢 SAÚDE FINANCEIRA EXCELENTE: A operação registra saldo positivo de R$ {saldo_liquido:,.2f} com margem operacional de {margem_op:.1f}%. A receita é suficiente para cobrir 100% dos custos operacionais."
+    elif saldo_liquido == 0:
+        analise_texto = "🟡 ATENÇÃO - BREAK-EVEN OPERACIONAL: O faturamento total emparelhou exatamente com os custos do período. Recomenda-se acompanhamento rigoroso."
+    else:
+        analise_texto = f"🔴 ALERTA DE DÉFICIT OPERACIONAL: As despesas superaram as receitas do período em R$ {abs(saldo_liquido):,.2f}. Recomenda-se contenção de despesas administrativas imediata."
 
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        df_formatado.to_excel(writer, index=False, sheet_name="Fluxo_de_Caixa")
-
         workbook = writer.book
-        worksheet = writer.sheets["Fluxo_de_Caixa"]
+
+        # -------------------------------------------------------------
+        # 🎨 PALETA E ESTILOS PROFISSIONAIS (MAGENTA & INSTITUCIONAL)
+        # -------------------------------------------------------------
+        COR_PRIMARIA = "#FF1493"      # Rosa/Magenta Farmácia Jr.
+        COR_FUNDO_CAB = "#C71585"     # Magenta Escuro
+        COR_VERDE_BG = "#E8F5E9"      # Verde Receita
+        COR_VERDE_TXT = "#2E7D32"
+        COR_VERMELHO_BG = "#FFEBEE"   # Vermelho Despesa
+        COR_VERMELHO_TXT = "#C62828"
+
+        fmt_capa_titulo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 18,
+            "font_color": "#FFFFFF", "fg_color": COR_FUNDO_CAB,
+            "align": "center", "valign": "vcenter",
+        })
+
+        fmt_capa_sub = workbook.add_format({
+            "italic": True, "font_name": "Arial", "font_size": 10,
+            "font_color": "#FFFFFF", "fg_color": COR_FUNDO_CAB,
+            "align": "center", "valign": "vcenter",
+        })
+
+        fmt_kpi_titulo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 9,
+            "font_color": "#555555", "fg_color": "#F3F4F6",
+            "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": "#D1D5DB",
+        })
+
+        fmt_kpi_rec = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 13,
+            "font_color": COR_VERDE_TXT, "fg_color": COR_VERDE_BG,
+            "num_format": "R$ #,##0.00", "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": COR_VERDE_TXT,
+        })
+
+        fmt_kpi_desp = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 13,
+            "font_color": COR_VERMELHO_TXT, "fg_color": COR_VERMELHO_BG,
+            "num_format": "R$ #,##0.00", "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": COR_VERMELHO_TXT,
+        })
+
+        fmt_kpi_saldo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 13,
+            "font_color": COR_VERDE_TXT if saldo_liquido >= 0 else COR_VERMELHO_TXT,
+            "fg_color": COR_VERDE_BG if saldo_liquido >= 0 else COR_VERMELHO_BG,
+            "num_format": "R$ #,##0.00", "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": COR_VERDE_TXT if saldo_liquido >= 0 else COR_VERMELHO_TXT,
+        })
+
+        fmt_kpi_num = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 13,
+            "font_color": "#1F2937", "fg_color": "#FFFFFF",
+            "align": "center", "valign": "vcenter",
+            "border": 1, "border_color": "#D1D5DB",
+        })
+
+        fmt_secao_titulo = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 11,
+            "font_color": COR_FUNDO_CAB, "bottom": 2, "bottom_color": COR_FUNDO_CAB,
+        })
 
         fmt_cabecalho = workbook.add_format({
             "bold": True, "text_wrap": True, "valign": "vcenter", "align": "center",
-            "fg_color": "#FF1493", "font_color": "#FFFFFF", "font_name": "Arial", "font_size": 10,
+            "fg_color": COR_PRIMARIA, "font_color": "#FFFFFF", "font_name": "Arial", "font_size": 10,
             "border": 1, "border_color": "#D3D3D3",
         })
 
@@ -225,37 +306,202 @@ def gerar_excel_estilizado(df_export):
             "border": 1, "border_color": "#E0E0E0",
         })
 
+        fmt_celula_zebra = workbook.add_format({
+            "font_name": "Arial", "font_size": 9, "align": "left", "valign": "vcenter",
+            "border": 1, "border_color": "#E0E0E0", "bg_color": "#F9FAFB",
+        })
+
         fmt_moeda = workbook.add_format({
             "font_name": "Arial", "font_size": 9, "num_format": "R$ #,##0.00",
             "align": "right", "valign": "vcenter", "border": 1, "border_color": "#E0E0E0",
         })
 
-        fmt_data = workbook.add_format({
-            "font_name": "Arial", "font_size": 9, "align": "center", "valign": "vcenter",
-            "border": 1, "border_color": "#E0E0E0",
+        fmt_moeda_zebra = workbook.add_format({
+            "font_name": "Arial", "font_size": 9, "num_format": "R$ #,##0.00",
+            "align": "right", "valign": "vcenter", "border": 1, "border_color": "#E0E0E0",
+            "bg_color": "#F9FAFB",
         })
 
+        fmt_analise = workbook.add_format({
+            "font_name": "Arial", "font_size": 9.5, "text_wrap": True,
+            "valign": "vcenter", "fg_color": "#F8FAFC", "border": 1, "border_color": "#CBD5E1",
+        })
+
+        fmt_rodape = workbook.add_format({
+            "font_name": "Arial", "font_size": 8.5, "italic": True,
+            "font_color": "#64748B", "align": "center", "valign": "vcenter",
+        })
+
+        # =============================================================
+        # 1. ABA DASHBOARD EXECUTIVO
+        # =============================================================
+        ws_dash = workbook.add_worksheet("📊 Dashboard Executivo")
+        ws_dash.hide_gridlines(2)
+        ws_dash.set_landscape()
+        ws_dash.set_paper(9)
+
+        # Inserção do Logo se a imagem existir
+        if os.path.exists("assets/logo.png"):
+            ws_dash.insert_image("B2", "assets/logo.png", {"x_scale": 0.20, "y_scale": 0.20})
+
+        ws_dash.merge_range("C2:H3", "RELATÓRIO FINANCEIRO GERENCIAL — FARMÁCIA JR.", fmt_capa_titulo)
+        ws_dash.merge_range("C4:H4", f"UFMG · Vice-Presidência Financeira  |  Gerado em {agora.strftime('%d/%m/%Y às %H:%M')}", fmt_capa_sub)
+
+        # Cartões KPI
+        ws_dash.write("B6", "📌 INDICADORES CHAVE DA OPERAÇÃO", fmt_secao_titulo)
+
+        ws_dash.merge_range("B7:C7", "FATURAMENTO (RECEITAS)", fmt_kpi_titulo)
+        ws_dash.merge_range("B8:C8", tot_receitas, fmt_kpi_rec)
+
+        ws_dash.merge_range("D7:E7", "DESPESAS ACUMULADAS", fmt_kpi_titulo)
+        ws_dash.merge_range("D8:E8", tot_despesas, fmt_kpi_desp)
+
+        ws_dash.merge_range("F7:G7", "SALDO OPERACIONAL", fmt_kpi_titulo)
+        ws_dash.merge_range("F8:G8", saldo_liquido, fmt_kpi_saldo)
+
+        ws_dash.write("H7", "TICKET MÉDIO REC.", fmt_kpi_titulo)
+        ws_dash.write("H8", ticket_medio, fmt_kpi_rec)
+
+        ws_dash.write("I7", "TOTAL REGISTROS", fmt_kpi_titulo)
+        ws_dash.write("I8", f"{qtd_lancamentos} un", fmt_kpi_num)
+
+        # Tabela Suporte do Gráfico
+        ws_dash.write("B11", "📊 RESUMO DE CAIXA MENSAL", fmt_secao_titulo)
+        ws_dash.write("B13", "Métrica", fmt_cabecalho)
+        ws_dash.write("C13", "Valor (R$)", fmt_cabecalho)
+
+        ws_dash.write("B14", "Entradas (Receitas)", fmt_celula)
+        ws_dash.write("C14", tot_receitas, fmt_moeda)
+
+        ws_dash.write("B15", "Saídas (Despesas)", fmt_celula)
+        ws_dash.write("C15", tot_despesas, fmt_moeda)
+
+        ws_dash.write("B16", "Resultado Líquido", fmt_celula)
+        ws_dash.write("C16", saldo_liquido, fmt_moeda)
+
+        # Gráfico Nátivo Excel
+        chart_resumo = workbook.add_chart({"type": "column"})
+        chart_resumo.add_series({
+            "name": "Consolidado R$",
+            "categories": "='📊 Dashboard Executivo'!$B$14:$B$15",
+            "values": "='📊 Dashboard Executivo'!$C$14:$C$15",
+            "fill": {"color": COR_PRIMARIA},
+            "data_labels": {"value": True, "num_format": "R$ #,##0"},
+        })
+        chart_resumo.set_title({"name": "Comparativo Entradas vs Saídas (R$)"})
+        chart_resumo.set_legend({"none": True})
+        chart_resumo.set_size({"width": 460, "height": 220})
+        ws_dash.insert_chart("D11", chart_resumo)
+
+        # Comentário / Análise Automática
+        ws_dash.write("B20", "💬 ANÁLISE TÉCNICA E PARECER FINANCEIRO", fmt_secao_titulo)
+        ws_dash.merge_range("B21:I22", analise_texto, fmt_analise)
+
+        # Rodapé
+        ws_dash.merge_range("B25:I25", "Farmácia Jr. UFMG — Documento Financeiro Oficial e Confidencial", fmt_rodape)
+
+        ws_dash.set_column("A:A", 3)
+        ws_dash.set_column("B:I", 17)
+
+        # =============================================================
+        # 2. ABA RESUMO POR DEPARTAMENTO
+        # =============================================================
+        ws_depto = workbook.add_worksheet("🏢 Resumo por Diretoria")
+        ws_depto.set_landscape()
+
+        if not df_calc.empty:
+            df_depto = df_calc.groupby(["departamento", "tipo"])["valor_liquido"].sum().unstack(fill_value=0.0).reset_index()
+            if "Receita" not in df_depto.columns:
+                df_depto["Receita"] = 0.0
+            if "Despesa" not in df_depto.columns:
+                df_depto["Despesa"] = 0.0
+            df_depto["Saldo Líquido"] = df_depto["Receita"] - df_depto["Despesa"]
+            df_depto = df_depto.rename(columns={"departamento": "Diretoria"})
+        else:
+            df_depto = pd.DataFrame(columns=["Diretoria", "Receita", "Despesa", "Saldo Líquido"])
+
+        for col_num, val in enumerate(df_depto.columns):
+            ws_depto.write(0, col_num, val, fmt_cabecalho)
+
+        for row_num in range(len(df_depto)):
+            zebra = row_num % 2 == 1
+            f_txt = fmt_celula_zebra if zebra else fmt_celula
+            f_moeda = fmt_moeda_zebra if zebra else fmt_moeda
+
+            for col_num, col_name in enumerate(df_depto.columns):
+                v = df_depto.iloc[row_num, col_num]
+                if col_name == "Diretoria":
+                    ws_depto.write(row_num + 1, col_num, str(v), f_txt)
+                else:
+                    ws_depto.write_number(row_num + 1, col_num, float(v), f_moeda)
+
+        # Gráfico por Diretoria
+        if not df_depto.empty:
+            chart_depto = workbook.add_chart({"type": "bar", "subtype": "group"})
+            chart_depto.add_series({
+                "name": "Receita",
+                "categories": f"='🏢 Resumo por Diretoria'!$A$2:$A${len(df_depto)+1}",
+                "values": f"='🏢 Resumo por Diretoria'!$B$2:$B${len(df_depto)+1}",
+                "fill": {"color": COR_VERDE_TXT},
+            })
+            chart_depto.add_series({
+                "name": "Despesa",
+                "categories": f"='🏢 Resumo por Diretoria'!$A$2:$A${len(df_depto)+1}",
+                "values": f"='🏢 Resumo por Diretoria'!$C$2:$C${len(df_depto)+1}",
+                "fill": {"color": COR_VERMELHO_TXT},
+            })
+            chart_depto.set_title({"name": "Desempenho Financeiro por Diretoria (R$)"})
+            chart_depto.set_size({"width": 550, "height": 280})
+            ws_depto.insert_chart("E2", chart_depto)
+
+        for col_num, col_name in enumerate(df_depto.columns):
+            max_len = max((df_depto[col_name].astype(str).map(len).max() if not df_depto.empty else 0), len(col_name)) + 6
+            ws_depto.set_column(col_num, col_num, min(max_len, 35))
+        ws_depto.freeze_panes(1, 1)
+
+        # =============================================================
+        # 3. ABA BASE DE DADOS COMPLETA (COM ZEBRA E FILTRO AUTOMÁTICO)
+        # =============================================================
+        colunas_renomeadas = {
+            "id": "ID", "mes": "Mês", "data": "Data", "departamento": "Diretoria", "tipo": "Tipo",
+            "categoria": "Categoria", "descricao": "Descrição da Operação", "valor_bruto": "Valor Bruto",
+            "taxa": "Taxas", "valor_liquido": "Valor Líquido", "conta_origem": "Conta Bancária",
+            "status_pagamento": "Status Pagamento", "nota_fiscal": "Nota Fiscal", "status_onvio": "Status Contábil",
+        }
+
+        df_formatado = df_export.copy()
+        cols_existentes = [c for c in colunas_renomeadas.keys() if c in df_formatado.columns]
+        df_formatado = df_formatado[cols_existentes].rename(columns=colunas_renomeadas)
+
+        ws_base = workbook.add_worksheet("💰 Base Fluxo de Caixa")
+        ws_base.set_landscape()
+
         for col_num, value in enumerate(df_formatado.columns):
-            worksheet.write(0, col_num, value, fmt_cabecalho)
+            ws_base.write(0, col_num, value, fmt_cabecalho)
 
         for row_num in range(len(df_formatado)):
+            zebra = row_num % 2 == 1
+            f_txt = fmt_celula_zebra if zebra else fmt_celula
+            f_moeda = fmt_moeda_zebra if zebra else fmt_moeda
+
             for col_num, col_name in enumerate(df_formatado.columns):
                 val = df_formatado.iloc[row_num, col_num]
                 if "Valor" in col_name or "Taxa" in col_name:
-                    worksheet.write_number(row_num + 1, col_num, float(val or 0.0), fmt_moeda)
-                elif "Data" in col_name:
-                    worksheet.write(row_num + 1, col_num, str(val or ""), fmt_data)
+                    ws_base.write_number(row_num + 1, col_num, float(val or 0.0), f_moeda)
                 else:
-                    worksheet.write(row_num + 1, col_num, str(val or ""), fmt_celula)
+                    ws_base.write(row_num + 1, col_num, str(val or ""), f_txt)
 
         for col_num, col_name in enumerate(df_formatado.columns):
             max_len = max(
                 (df_formatado[col_name].astype(str).map(len).max() if not df_formatado.empty else 0),
                 len(col_name),
             ) + 4
-            worksheet.set_column(col_num, col_num, min(max_len, 45))
+            ws_base.set_column(col_num, col_num, min(max_len, 45))
 
-        worksheet.freeze_panes(1, 0)
+        # Filtro Automático e Freeze Panes
+        if not df_formatado.empty:
+            ws_base.autofilter(0, 0, len(df_formatado), len(df_formatado.columns) - 1)
+        ws_base.freeze_panes(1, 1)
 
     return buffer.getvalue()
 
@@ -284,7 +530,8 @@ def renderizar_aba_fluxo_caixa():
 
     with aba_manual:
         with st.expander("Abrir Formulário de Operação Manual"):
-            data = st.date_input("Data do Lançamento", value=datetime.now())
+            agora = obter_agora_br()
+            data = st.date_input("Data do Lançamento", value=agora)
             depto = st.selectbox("Departamento", ["VP", "IMAGEM", "AR", "PRESIDÊNCIA", "PROJETOS", "NEGÓCIOS"])
             tipo = st.selectbox("Tipo", ["Receita", "Despesa"])
             cat = st.selectbox("Categoria", ["Serviço Prestado", "ADM: Operacional", "Marketing", "Eventos"])
@@ -359,17 +606,18 @@ def renderizar_aba_fluxo_caixa():
                     else:
                         conta_final_pdf = conta_sel_pdf
 
+                    agora = obter_agora_br()
                     dados_finais = []
                     for item in lancamentos_ia:
                         try:
                             dt_obj = datetime.strptime(item["data"], "%Y-%m-%d")
                             mes_calculado = lista_meses[dt_obj.month - 1]
                         except Exception:
-                            mes_calculado = "Janeiro"
+                            mes_calculado = lista_meses[agora.month - 1]
 
                         dados_finais.append({
                             "mes": mes_calculado,
-                            "data": item.get("data", datetime.now().strftime("%Y-%m-%d")),
+                            "data": item.get("data", agora.strftime("%Y-%m-%d")),
                             "departamento": "GERAL",
                             "tipo": item.get("tipo", "Despesa"),
                             "categoria": "ADM: Operacional" if item.get("tipo") == "Despesa" else "Serviço Prestado",
@@ -392,7 +640,7 @@ def renderizar_aba_fluxo_caixa():
                         else:
                             with st.spinner("⚡ Salvando em lote instantaneamente..."):
                                 salvar_lancamentos_em_lote(dados_finais)
-                            st.success(f"Lançamentos salvos no banco de dados!")
+                            st.success("Lançamentos salvos no banco de dados!")
                             st.rerun()
                 else:
                     st.warning("Não foram encontrados lançamentos válidos no extrato.")
@@ -445,9 +693,9 @@ def renderizar_aba_fluxo_caixa():
         excel_estilizado_bytes = gerar_excel_estilizado(df_filtrado)
 
         st.download_button(
-            label="📊 Baixar Relatório Consolidado em Excel (.xlsx)",
+            label="📊 Baixar Relatório Executivo Consolidado (.xlsx)",
             data=excel_estilizado_bytes,
-            file_name=f"Planilha_Fluxo_Caixa_FarmaciaJr_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+            file_name=f"Relatorio_Financeiro_FarmaciaJr_{obter_agora_br().strftime('%Y-%m-%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
