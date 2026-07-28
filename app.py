@@ -14,63 +14,132 @@ from modulos.gestao_interna import renderizar_gestao_interna
 from modulos.dashboard import renderizar_dashboard_geral        
 from modulos.leads import renderizar_modulo_leads
 
-# Garante que o banco de dados e as tabelas principais existam ao iniciar
+# Garante a inicialização do banco de dados
 inicializar_banco_dados()
 
-st.set_page_config(page_title="Plataforma VP — Farmácia Jr.", page_icon="🦩", layout="wide")
+st.set_page_config(
+    page_title="Plataforma VP — Farmácia Jr.",
+    page_icon="🦩",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- CUSTOMIZAÇÃO VISUAL: IDENTIDADE DA VP COM CONTRASTE PERFEITO ---
+# --- DESIGN SYSTEM EXCLUSIVO (UI/UX VP FARMÁCIA JR.) ---
 st.markdown("""
     <style>
-        /* Define o fundo de toda a aplicação como claro/branco */
-        .stApp {
-            background-color: #FAFAFA !important;
-            color: #333333 !important;
+        /* 1. CONFIGURAÇÃO GERAL DA PÁGINA */
+        html, body, [data-testid="stAppViewContainer"] {
+            background-color: #F8F9FA !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+            color: #212529 !important;
         }
 
-        /* Menu lateral (Sidebar): Tom rosa vibrante elegante para dar leitura perfeita */
+        /* 2. BARRA LATERAL (SIDEBAR ELEGANTE) */
         [data-testid="stSidebar"] {
-            background-color: #FFF0F5 !important;
-            border-right: 2px solid #FFB6C1 !important;
+            background: linear-gradient(180deg, #4A122E 0%, #2D0B1C 100%) !important;
+            border-right: 1px solid #E9ECEF !important;
+            box-shadow: 2px 0 12px rgba(0,0,0,0.05);
         }
 
-        /* Força a cor dos textos e labels do menu lateral para escuro/legível */
-        [data-testid="stSidebar"] *, [data-testid="stSidebar"] label, [data-testid="stSidebar"] span {
-            color: #4A154B !important;
-            font-weight: 600 !important;
+        /* Textos, títulos e rótulos da Sidebar em branco/rosa claro */
+        [data-testid="stSidebar"] *, 
+        [data-testid="stSidebar"] label, 
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] p {
+            color: #F8F9FA !important;
+            font-size: 0.95rem !important;
         }
 
-        /* Cor dos botões principais */
-        div.stButton > button:first-child {
-            background-color: #FF69B4 !important;
-            color: white !important;
+        /* Itens de navegação da Sidebar */
+        [data-testid="stSidebar"] div[role="radiogroup"] > label {
+            background-color: rgba(255, 255, 255, 0.05) !important;
+            padding: 10px 14px !important;
+            border-radius: 8px !important;
+            margin-bottom: 6px !important;
+            transition: all 0.2s ease-in-out !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
+            background-color: rgba(255, 255, 255, 0.15) !important;
+            transform: translateX(4px);
+        }
+
+        /* Item do menu selecionado */
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
+            background: linear-gradient(90deg, #E6007E 0%, #C71585 100%) !important;
+            font-weight: bold !important;
+            border: none !important;
+            box-shadow: 0 4px 10px rgba(230, 0, 126, 0.3) !important;
+        }
+
+        /* 3. CAMPOS DE ENTRADA (INPUTS DE TEXTO E SENHA) */
+        div[data-baseweb="input"] > div {
+            background-color: #FFFFFF !important;
+            border: 1.5px solid #CED4DA !important;
+            border-radius: 8px !important;
+            color: #212529 !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important;
+        }
+
+        div[data-baseweb="input"] > div:focus-within {
+            border-color: #E6007E !important;
+            box-shadow: 0 0 0 3px rgba(230, 0, 126, 0.15) !important;
+        }
+
+        input {
+            color: #212529 !important;
+            background-color: transparent !important;
+        }
+
+        /* 4. BOTÕES PRINCIPAIS */
+        div.stButton > button {
+            background: linear-gradient(90deg, #E6007E 0%, #C71585 100%) !important;
+            color: #FFFFFF !important;
             border-radius: 8px !important;
             border: none !important;
-            font-weight: bold !important;
-        }
-        div.stButton > button:first-child:hover {
-            background-color: #FF1493 !important;
-            color: white !important;
-        }
-
-        /* Customização dos links e títulos */
-        h1, h2, h3, h4 {
-            color: #C71585 !important;
+            font-weight: 600 !important;
+            padding: 10px 24px !important;
+            box-shadow: 0 4px 12px rgba(230, 0, 126, 0.25) !important;
+            transition: all 0.2s ease-in-out !important;
+            width: 100% !important;
         }
 
-        /* Customização das abas superiores (Tabs) */
+        div.stButton > button:hover {
+            background: linear-gradient(90deg, #D00072 0%, #B01075 100%) !important;
+            box-shadow: 0 6px 16px rgba(230, 0, 126, 0.35) !important;
+            transform: translateY(-1px);
+        }
+
+        /* 5. TÍTULOS E CARTÕES DA TELA PRINCIPAL */
+        h1, h2, h3 {
+            color: #2D0B1C !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.5px !important;
+        }
+
+        .stCaption {
+            color: #6C757D !important;
+        }
+
+        /* Card container para login e formulários */
+        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div.element-container {
+            border-radius: 12px;
+        }
+
+        /* Ajuste das abas (Tabs) */
         button[data-baseweb="tab"] {
-            color: #555555 !important;
-            font-weight: bold !important;
+            color: #495057 !important;
+            font-weight: 600 !important;
         }
         button[aria-selected="true"] {
-            color: #FF1493 !important;
-            border-bottom-color: #FF1493 !important;
+            color: #E6007E !important;
+            border-bottom-color: #E6007E !important;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# Inicializa as variáveis de controle de sessão do Streamlit
+# Inicializa as variáveis de sessão
 if "logado" not in st.session_state:
     st.session_state.logado = False
 if "email_usuario" not in st.session_state:
@@ -83,16 +152,22 @@ if "departamento_usuario" not in st.session_state:
     st.session_state.departamento_usuario = "Geral"
 
 # =======================================================================
-# --- FLUXO DE TELA 1: SE NÃO ESTIVER LOGADO ---
+# --- TELA 1: LOGIN AMIGÁVEL E CLEAN ---
 # =======================================================================
 if not st.session_state.logado:
-    st.title("🦩 Login - Plataforma Financeira da Farmácia Jr.")
-    st.caption("Qualquer membro com e-mail @farmaciajr.com possui auto-cadastro liberado no primeiro acesso.")
+    col1, col2, col3 = st.columns([1, 2, 1])
     
-    with st.container():
-        email_input = st.text_input("E-mail Institucional:")
-        senha_input = st.text_input("Senha:", type="password")
-        botao_login = st.button("Entrar no Sistema")
+    with col2:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center;'>🦩 Plataforma VP</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #6C757D;'>Farmácia Jr. — Gestão Financeira & Operacional</p>", unsafe_allow_html=True)
+        st.markdown("---")
+        
+        email_input = st.text_input("E-mail Institucional:", placeholder="seu-email@farmaciajr.com")
+        senha_input = st.text_input("Senha:", type="password", placeholder="••••••••")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        botao_login = st.button("Acessar Plataforma")
         
         if botao_login:
             if email_input and senha_input:
@@ -109,10 +184,10 @@ if not st.session_state.logado:
                 else:
                     st.error(checagem["mensagem"])
             else:
-                st.error("Por favor, preencha todos os campos para fazer o login.")
+                st.error("Por favor, informe seu e-mail e sua senha para entrar.")
 
 # =======================================================================
-# --- FLUXO DE TELA 2: PRIMEIRO ACESSO OBRIGATÓRIO (TROCA DE SENHA) ---
+# --- TELA 2: TROCA DE SENHA (PRIMEIRO ACESSO) ---
 # =======================================================================
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
     conn = sqlite3.connect('database/financeiro_v2.db')
@@ -128,18 +203,18 @@ elif st.session_state.logado and st.session_state.primeiro_login == 1:
         st.rerun()
 
 # =======================================================================
-# --- FLUXO DE TELA 3: HOME PRINCIPAL COM MENU DINÂMICO PROTEGIDO ---
+# --- TELA 3: PAINEL PRINCIPAL DA PLATAFORMA ---
 # =======================================================================
 else:
-    st.sidebar.markdown("<h2 style='color: #FF1493;'>🦩 Setor VP</h2>", unsafe_allow_html=True)
-    st.sidebar.title(f"Olá, {st.session_state.nome_usuario}!")
-    st.sidebar.markdown(f"**Setor:** {st.session_state.departamento_usuario}")
-    st.sidebar.markdown("---")
+    # Sidebar Superior
+    st.sidebar.markdown("<h2 style='color: #FFFFFF; margin-bottom: 0px;'>🦩 Setor VP</h2>", unsafe_allow_html=True)
+    st.sidebar.markdown(f"<p style='color: #E6007E !important; font-weight: bold;'>Olá, {st.session_state.nome_usuario}!</p>", unsafe_allow_html=True)
+    st.sidebar.markdown(f"<small style='color: #ADB5BD;'>Setor: {st.session_state.departamento_usuario}</small>", unsafe_allow_html=True)
+    st.sidebar.markdown("<hr style='border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
     
-    # Menu básico reduzido para membros comuns
+    # Opções do Menu
     opcoes_menu = ["Totem de Vendas Express", "Planejamento de Eventos"]
     
-    # Menu executivo completo liberado para VP e Presidência
     if st.session_state.departamento_usuario in ["VP", "Presidência"] or st.session_state.email_usuario in ["vice-presidencia@farmaciajr.com", "presidencia@farmaciajr.com"]:
         opcoes_menu = [
             "Dashboard Geral", 
@@ -152,10 +227,10 @@ else:
             "Gerenciar Equipe"
         ]
 
-    menu = st.sidebar.radio("Navegar por Funções:", opcoes_menu)
+    menu = st.sidebar.radio("Navegação:", opcoes_menu)
 
-    st.sidebar.markdown("---")
-    if st.sidebar.button("🚪 Sair / Logout"):
+    st.sidebar.markdown("<hr style='border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
+    if st.sidebar.button("🚪 Encerrar Sessão"):
         st.session_state.logado = False
         st.session_state.email_usuario = ""
         st.session_state.nome_usuario = ""
@@ -163,27 +238,20 @@ else:
         st.session_state.departamento_usuario = "Geral"
         st.rerun()
 
-    # --- CONTROLADOR ESTRUTURADO DE EXIBIÇÃO DE PÁGINAS ---
+    # Roteamento de Páginas
     if menu == "Dashboard Geral":
         renderizar_dashboard_geral()
-        
     elif menu == "Calculadora de Precificação":
         renderizar_aba_precificacao()
-        
     elif menu == "Fluxo de Caixa":
         renderizar_aba_fluxo_caixa()
-        
     elif menu == "Gerenciar Equipe":
         renderizar_gerenciamento_equipe(st.session_state.email_usuario)
-        
     elif menu == "Planejamento de Eventos":
         renderizar_gestao_eventos()
-        
     elif menu == "Contratos e Demandas Internas":
         renderizar_gestao_interna()
-        
     elif menu == "Pipeline de Leads":
         renderizar_modulo_leads()
-        
     elif menu == "Totem de Vendas Express":
         renderizar_totem()
