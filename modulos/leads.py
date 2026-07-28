@@ -358,7 +358,6 @@ def gerar_dossie_executivo_pdf(row):
     story.append(Paragraph(parecer_auto, text_normal))
     story.append(Spacer(1, 20))
 
-    # Campo de Assinatura com tags <br/> autoencerráveis corrigidas
     dados_ass = [
         [
             Paragraph(
@@ -490,12 +489,9 @@ def renderizar_modulo_leads():
 
             with col_p1:
                 st.markdown(f"#### 📊 Ficha do Projeto: **{empresa_sel}**")
+                st.write(f"👤 **Assessor Responsável:** {row_sel['assessor']}")
                 st.write(
-                    f"👤 **Assessor Responsável:** {row_sel['assessor']}"
-                )
-                st.write(
-                    "💰 **Valor Precificado:** R$"
-                    f" {row_sel['valor_precificacao']:,.2f}"
+                    f"💰 **Valor Precificado:** R$ {row_sel['valor_precificacao']:,.2f}"
                 )
                 st.write(
                     f"🎯 **Estágio Funil:** {row_sel.get('stage_funil', '🎯 Lead')}"
@@ -519,8 +515,7 @@ def renderizar_modulo_leads():
                     f"<div style='background-color: {risco_hex}15; border-left:"
                     f" 5px solid {risco_hex}; padding: 10px; border-radius:"
                     f" 6px; margin-top: 10px;'><b>Status de Risco:</b><br/><span"
-                    f" style='color:{risco_hex};"
-                    f" font-weight:bold;'>{risco_l}</span></div>",
+                    f" style='color:{risco_hex}; font-weight:bold;'>{risco_l}</span></div>",
                     unsafe_allow_html=True,
                 )
 
@@ -530,13 +525,11 @@ def renderizar_modulo_leads():
             def render_link(nome, link):
                 if link:
                     st.markdown(
-                        f"🟢 **{nome}:** [Acessar Documento no"
-                        f" Drive]({link})"
+                        f"🟢 **{nome}:** [Acessar Documento no Drive]({link})"
                     )
                 else:
                     st.markdown(
-                        f"🔴 **{nome}:** <span style='color:red;'>Pendente de"
-                        " Anexo</span>",
+                        f"🔴 **{nome}:** <span style='color:red;'>Pendente de Anexo</span>",
                         unsafe_allow_html=True,
                     )
 
@@ -545,32 +538,34 @@ def renderizar_modulo_leads():
                 render_link("Contrato Assinado", row_sel["link_contrato"])
                 render_link("Termo de Abertura", row_sel["link_termo_abertura"])
             with col_chk2:
-                render_link(
-                    "Termo de Fechamento", row_sel["link_termo_fechamento"]
-                )
+                render_link("Termo de Fechamento", row_sel["link_termo_fechamento"])
                 render_link(
                     f"Pasta de Boletos ({row_sel['tipo_boleto']})",
                     row_sel["link_boletos"],
                 )
 
             st.markdown("---")
+            
+            # 🗑️ EXCLUSÃO SEGURA COM LIMPEZA DE SESSÃO
+            id_del = int(row_sel["id"])
             if st.button(
-                f"🗑️ Excluir Dossiê de {empresa_sel}",
-                key=f"del_dos_{row_sel['id']}",
+                f"🗑️ Deletar Dossiê de {empresa_sel}",
+                key=f"btn_del_lead_{id_del}",
+                type="primary",
+                use_container_width=True,
             ):
                 conn = sqlite3.connect(DB_PATH)
                 cursor = conn.cursor()
-                cursor.execute(
-                    "DELETE FROM leads_vp_auditoria WHERE id = ?",
-                    (row_sel["id"],),
-                )
+                cursor.execute("DELETE FROM leads_vp_auditoria WHERE id = ?", (id_del,))
                 conn.commit()
                 conn.close()
 
-                if "sb_dossie_select" in st.session_state:
-                    del st.session_state["sb_dossie_select"]
+                # Limpa a memória das chaves do selectbox para evitar crash do Streamlit
+                for k in ["sb_dossie_select", "sb_edit_lead"]:
+                    if k in st.session_state:
+                        del st.session_state[k]
 
-                st.success("Dossiê removido!")
+                st.success(f"Dossiê da empresa '{empresa_sel}' excluído com sucesso!")
                 st.rerun()
 
     # -----------------------------------------------------------------------
@@ -637,13 +632,10 @@ def renderizar_modulo_leads():
                         )
                         conn.commit()
                         conn.close()
-                        st.success(f"Dossiê do projeto {emp} aberto!")
+                        st.success(f"Dossiê do projeto {emp} aberto com sucesso!")
                         st.rerun()
                     except sqlite3.IntegrityError:
-                        st.error(
-                            "Esta empresa já possui um Dossiê cadastrado no"
-                            " sistema."
-                        )
+                        st.error("Esta empresa já possui um Dossiê cadastrado no sistema.")
                 else:
                     st.error("Preencha ao menos o nome do cliente e o assessor.")
 
