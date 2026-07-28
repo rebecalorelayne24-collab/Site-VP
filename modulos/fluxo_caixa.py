@@ -87,7 +87,7 @@ def salvar_lancamento(
 
 
 def ler_extrato_com_gemini(texto_pdf):
-    """Envia o texto do extrato priorizando os modelos de alta cota diária (1.500 RPD)."""
+    """Envia o texto do extrato para o Gemini mapear os dados em JSON com suporte universal."""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
     if not api_key:
@@ -106,67 +106,56 @@ def ler_extrato_com_gemini(texto_pdf):
         Analise o texto deste extrato bancário e extraia TODOS os lançamentos válidos de entrada e saída.
         Ignore linhas de saldos, saques sem descrição, rendimentos informativos ou tarifas zeradas.
 
-        Para cada lançamento válido, retorne obrigatoriamente uma lista de objetos JSON contendo:
-        - data: formato YYYY-MM-DD (Se não tiver o ano no texto, assuma o ano atual de {datetime.now().year})
-        - tipo: "Receita" (para PIX recebidos, depósitos, créditos) ou "Despesa" (para PIX enviados, pagamentos, boletos, tarifas)
-        - descricao: descrição limpa da transação
-        - valor_bruto: valor numérico float positivo (ex: 150.50)
-
-        Exemplo de resposta esperada:
+        Para cada lançamento válido, retorne obrigatoriamente uma lista JSON no formato puro (sem markdown ou texto extra):
         [
             {{"data": "2026-03-15", "tipo": "Receita", "descricao": "PIX RECEBIDO - JOAO SILVA", "valor_bruto": 150.00}},
             {{"data": "2026-03-16", "tipo": "Despesa", "descricao": "COMPRA DE JALECOS", "valor_bruto": 450.50}}
         ]
 
+        Regras:
+        - data: YYYY-MM-DD (se não houver ano, use {datetime.now().year})
+        - tipo: "Receita" ou "Despesa"
+        - valor_bruto: número float positivo
+
         Texto do extrato:
         {texto_pdf}
         """
 
-        # Prioriza modelos com limite de 1.500 chamadas/dia
-        modelos_alta_cota = [
-            "gemini-1.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash-8b",
-            "gemini-2.5-flash",
-        ]
-
+        modelos = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
         resposta_texto = None
+        ultimo_erro = None
 
-        for nome_modelo in modelos_alta_cota:
+        for m in modelos:
             try:
-                model = genai.GenerativeModel(
-                    nome_modelo,
-                    generation_config={"response_mime_type": "application/json"},
-                )
-                response = model.generate_content(prompt)
-                if response and response.text:
-                    resposta_texto = response.text.strip()
+                model = genai.GenerativeModel(m)
+                res = model.generate_content(prompt)
+                if res and res.text:
+                    resposta_texto = res.text.strip()
                     break
-            except Exception:
-                # Tenta sem o parâmetro mime_type
-                try:
-                    model = genai.GenerativeModel(nome_modelo)
-                    response = model.generate_content(prompt)
-                    if response and response.text:
-                        resposta_texto = response.text.strip()
-                        break
-                except Exception:
-                    continue
+            except Exception as err:
+                ultimo_erro = err
+                continue
 
         if not resposta_texto:
-            st.error("⚠️ Não foi possível obter resposta da IA. Verifique sua API Key ou tente novamente em alguns instantes.")
+            st.error(f"⚠️ Erro ao comunicar com a API do Gemini: {ultimo_erro}")
             return []
 
+        # Trata limpeza de blocos ```json ... ```
         if "```" in resposta_texto:
-            resposta_texto = resposta_texto.split("```")[1]
-            if resposta_texto.startswith("json"):
-                resposta_texto = resposta_texto[4:]
+            partes = resposta_texto.split("```")
+            for parte in partes:
+                parte_limpa = parte.strip()
+                if parte_limpa.startswith("json"):
+                    parte_limpa = parte_limpa[4:].strip()
+                if parte_limpa.startswith("[") and parte_limpa.endswith("]"):
+                    resposta_texto = parte_limpa
+                    break
 
         dados = json.loads(resposta_texto.strip())
         return dados if isinstance(dados, list) else []
 
     except json.JSONDecodeError as e:
-        st.error(f"Erro ao converter a resposta da IA em lista financeira: {e}")
+        st.error(f"A IA respondeu, mas não formatou o JSON corretamente: {e}")
         return []
     except Exception as e:
         st.error(f"Erro no processamento da IA: {e}")
