@@ -68,6 +68,18 @@ def garantir_colunas_documentacao():
     conn.close()
 
 
+def obter_lista_bancos(df):
+    """Retorna os bancos padrão somados aos bancos já cadastrados no banco de dados."""
+    bancos_padrao = ["PicPay", "Banco do Brasil", "Caixa", "Itaú", "Nubank"]
+    if not df.empty and "conta_origem" in df.columns:
+        bancos_existentes = [b for b in df["conta_origem"].dropna().unique() if b]
+        for b in bancos_existentes:
+            if b not in bancos_padrao:
+                bancos_padrao.append(b)
+    bancos_padrao.append("➕ Adicionar Novo Banco...")
+    return bancos_padrao
+
+
 def salvar_lancamento(
     mes,
     data,
@@ -83,7 +95,7 @@ def salvar_lancamento(
     nf,
     onvio,
 ):
-    """Insere um novo lançamento no fluxo de caixa."""
+    """Insere um lançamento único no banco de dados."""
     garantir_colunas_documentacao()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -115,76 +127,99 @@ def salvar_lancamento(
     conn.close()
 
 
+def salvar_lancamentos_em_lote(lista_lancamentos):
+    """Insere múltiplos lançamentos de forma instantânea em uma única transação."""
+    if not lista_lancamentos:
+        return
+
+    garantir_colunas_documentacao()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    dados_tuple = [
+        (
+            l["mes"],
+            l["data"],
+            l["departamento"],
+            l["tipo"],
+            l["categoria"],
+            l["descricao"],
+            l["valor_bruto"],
+            l["taxa"],
+            l["valor_liquido"],
+            l["conta_origem"],
+            l["status_pagamento"],
+            l["nota_fiscal"],
+            l["status_onvio"],
+        )
+        for l in lista_lancamentos
+    ]
+
+    cursor.executemany(
+        """
+        INSERT INTO fluxo_caixa_geral (
+            mes, data, departamento, tipo, categoria, descricao, 
+            valor_bruto, taxa, valor_liquido, conta_origem, 
+            status_pagamento, nota_fiscal, status_onvio
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+        dados_tuple,
+    )
+
+    conn.commit()
+    conn.close()
+
+
 def ler_extrato_com_gemini(texto_pdf):
-    """Lê qualquer extrato identificando inclusive a instituição financeira/banco de origem."""
+    """Lê o extrato com foco em alta velocidade de resposta."""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if api_key:
         api_key = str(api_key).strip().strip('"').strip("'")
 
-    if not api_key:
-        st.error("⚠️ Chave GEMINI_API_KEY não encontrada nos Secrets do Streamlit Cloud.")
-        return []
-
-    if not texto_pdf or len(texto_pdf.strip()) < 10:
-        st.warning("⚠️ O PDF parece estar sem texto editável.")
+    if not api_key or not texto_pdf or len(texto_pdf.strip()) < 10:
         return []
 
     try:
         genai.configure(api_key=api_key)
 
         prompt = f"""
-        Você é um assistente financeiro da Farmácia Jr. (UFMG).
-        Analise o texto deste extrato bancário e extraia TODOS os lançamentos válidos de entrada e saída.
-        Alem disso, identifique qual é a instituição bancária do extrato (ex: PicPay, Banco do Brasil, Caixa, Itaú, Nubank).
-        Ignore saldos finais de dia, resumos, CNPJ ou rodapés.
-
-        Retorne obrigatoriamente uma lista JSON no formato puro (sem marcadores adicionais fora do array):
+        Extraia todas as transações deste extrato bancário.
+        Retorne estritamente um array JSON puro no seguinte formato:
         [
-            {{"data": "2026-06-30", "tipo": "Receita", "descricao": "PIX RECEBIDO - VITORIA FERNANDES PEREIRA", "valor_bruto": 2.00, "banco": "PicPay"}},
-            {{"data": "2026-06-20", "tipo": "Despesa", "descricao": "PIX ENVIADO - AMERICANAS SA", "valor_bruto": 32.99, "banco": "PicPay"}}
+            {{"data": "2026-06-30", "tipo": "Receita", "descricao": "PIX RECEBIDO - NOME", "valor_bruto": 2.00, "banco": "PicPay"}}
         ]
-
-        Regras de Negócio:
+        Regras:
         - data: YYYY-MM-DD
-        - tipo: "Receita" ou "Despesa"
-        - descricao: Nome limpo da pessoa/empresa + tipo da operação
-        - valor_bruto: número float positivo
-        - banco: Nome do banco identificado no extrato (ex: 'PicPay', 'Banco do Brasil', 'Caixa')
+        - tipo: "Receita" (entradas/+) ou "Despesa" (saídas/-)
+        - valor_bruto: float positivo
+        - Ignore saldos e rodapés.
 
         Texto do extrato:
         {texto_pdf}
         """
 
-        modelos_fila = [
+        modelos_rapidos = [
+            "gemini-1.5-flash-8b",
+            "gemini-2.0-flash",
             "gemini-flash-latest",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite",
         ]
 
-        resposta_texto = None
-        ultimo_erro = None
-        erro_cota = False
+        generation_config = genai.types.GenerationConfig(temperature=0.0)
 
-        for nome_m in modelos_fila:
+        resposta_texto = None
+        for m in modelos_rapidos:
             try:
-                model = genai.GenerativeModel(nome_m)
-                res = model.generate_content(prompt)
+                model = genai.GenerativeModel(m)
+                res = model.generate_content(
+                    prompt, generation_config=generation_config
+                )
                 if res and res.text:
                     resposta_texto = res.text.strip()
                     break
-            except Exception as err:
-                msg = str(err)
-                ultimo_erro = msg
-                if "429" in msg or "quota" in msg.lower():
-                    erro_cota = True
+            except Exception:
                 continue
 
         if not resposta_texto:
-            if erro_cota:
-                st.error("⏳ A cota gratuita da sua API Key foi excedida.")
-            else:
-                st.error(f"⚠️ Erro ao comunicar com a IA: {ultimo_erro}")
             return []
 
         if "```" in resposta_texto:
@@ -200,11 +235,8 @@ def ler_extrato_com_gemini(texto_pdf):
         dados = json.loads(resposta_texto.strip())
         return dados if isinstance(dados, list) else []
 
-    except json.JSONDecodeError as e:
-        st.error(f"A IA não formatou a lista JSON corretamente: {e}")
-        return []
     except Exception as e:
-        st.error(f"Erro no processamento: {e}")
+        st.error(f"Erro no processamento rápido: {e}")
         return []
 
 
@@ -326,11 +358,21 @@ def renderizar_aba_fluxo_caixa():
         "<h2 style='text-align: center; color: #C71585;'>📊 Fluxo de Caixa Geral — Farmácia Jr.</h2>",
         unsafe_allow_html=True,
     )
-    st.write("Gerencie os registros financeiros de forma manual ou por IA.")
+    st.write("Gerencie os registros financeiros de forma manual ou por IA rápida.")
 
     lista_meses = [
-        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+        "Janeiro",
+        "Fevereiro",
+        "Março",
+        "Abril",
+        "Maio",
+        "Junho",
+        "Julho",
+        "Agosto",
+        "Setembro",
+        "Outubro",
+        "Novembro",
+        "Dezembro",
     ]
 
     conn = sqlite3.connect(DB_PATH)
@@ -339,8 +381,10 @@ def renderizar_aba_fluxo_caixa():
     )
     conn.close()
 
+    opcoes_bancos = obter_lista_bancos(df)
+
     aba_manual, aba_pdf = st.tabs(
-        ["➕ Registro Manual", "🤖 Importar por IA (PDF)"]
+        ["➕ Registro Manual", "⚡ Importar por IA Rápida (PDF)"]
     )
 
     with aba_manual:
@@ -359,21 +403,22 @@ def renderizar_aba_fluxo_caixa():
             v_bruto = st.number_input("Valor Bruto (R$)", min_value=0.0)
             v_taxa = st.number_input("Taxas (R$)", min_value=0.0, value=0.0)
             v_liq = v_bruto - v_taxa
-            conta = st.selectbox(
-                "Conta de Origem", ["PicPay", "Banco do Brasil", "Caixa", "Itaú", "Nubank"]
-            )
-            pagamento = st.selectbox(
-                "Status do Pagamento", ["🟢 Pago", "🟡 Pendente"]
-            )
-            nf = st.selectbox(
-                "Nota Fiscal",
-                ["🟢 Emitida", "🟡 Aguardando Emissão", "⚪ Não se aplica"],
-            )
+
+            conta_sel_manual = st.selectbox("Conta de Origem", opcoes_bancos, key="sb_manual_banco")
+            if conta_sel_manual == "➕ Adicionar Novo Banco...":
+                conta_final_manual = st.text_input("Digite o nome do novo banco:", key="txt_novo_banco_manual")
+            else:
+                conta_final_manual = conta_sel_manual
+
+            pagamento = st.selectbox("Status do Pagamento", ["🟢 Pago", "🟡 Pendente"])
+            nf = st.selectbox("Nota Fiscal", ["🟢 Emitida", "🟡 Aguardando Emissão", "⚪ Não se aplica"])
             onvio = st.selectbox("Status na Onvio", ["❌ Não enviado", "Enviado"])
 
             if st.button("Confirmar Lançamento Manual"):
                 if not desc:
                     st.error("Por favor, digite uma descrição para a movimentação.")
+                elif not conta_final_manual or conta_final_manual == "➕ Adicionar Novo Banco...":
+                    st.error("Por favor, informe um nome de banco válido.")
                 else:
                     mes_nome = lista_meses[data.month - 1]
                     salvar_lancamento(
@@ -386,17 +431,17 @@ def renderizar_aba_fluxo_caixa():
                         v_bruto,
                         v_taxa,
                         v_liq,
-                        conta,
+                        conta_final_manual.strip(),
                         pagamento,
                         nf,
                         onvio,
                     )
-                    st.success("Lançamento manual salvo!")
+                    st.success(f"Lançamento manual salvo na conta '{conta_final_manual.strip()}'!")
                     st.rerun()
 
     with aba_pdf:
-        st.markdown("#### 🤖 Leitura Cognitiva de Extratos com Gemini")
-        st.caption("Faça o upload do PDF. O Gemini detectará o banco, datas e valores automaticamente.")
+        st.markdown("#### ⚡ Leitura Cognitiva Ultra-Rápida de Extratos")
+        st.caption("Faça o upload do PDF. O modelo processará o documento em segundos.")
 
         arquivo_pdf = st.file_uploader(
             "Escolha o arquivo do Extrato (.pdf)",
@@ -404,7 +449,7 @@ def renderizar_aba_fluxo_caixa():
             key="uploader_ia_fluxo",
         )
         if arquivo_pdf is not None:
-            with st.spinner("🤖 Extraindo texto do documento..."):
+            with st.spinner("⚡ Lendo e interpretando extrato em alta velocidade..."):
                 try:
                     reader = PdfReader(arquivo_pdf)
                     texto_bruto = ""
@@ -417,15 +462,13 @@ def renderizar_aba_fluxo_caixa():
                     texto_bruto = ""
 
             if texto_bruto:
-                with st.spinner("🧠 O Gemini está interpretando as transações..."):
-                    lancamentos_ia = ler_extrato_com_gemini(texto_bruto)
+                lancamentos_ia = ler_extrato_com_gemini(texto_bruto)
 
                 if lancamentos_ia:
                     st.write(
-                        f"📋 **{len(lancamentos_ia)} lançamentos mapeados pela IA:**"
+                        f"📋 **{len(lancamentos_ia)} lançamentos mapeados em tempo recorde:**"
                     )
 
-                    # Tenta pegar o banco detectado pela IA na primeira transação
                     banco_detectado = (
                         lancamentos_ia[0].get("banco", "PicPay")
                         if lancamentos_ia
@@ -433,15 +476,23 @@ def renderizar_aba_fluxo_caixa():
                     )
 
                     c_b1, c_b2 = st.columns([2, 2])
-                    conta_selecionada = c_b1.selectbox(
-                        "🏦 Selecione/Confirme a Conta Bancária das transações:",
-                        ["PicPay", "Banco do Brasil", "Caixa", "Itaú", "Nubank"],
-                        index=(
-                            0
-                            if "picpay" in banco_detectado.lower()
-                            else (1 if "brasil" in banco_detectado.lower() else 0)
-                        ),
+                    idx_default = 0
+                    for i, op in enumerate(opcoes_bancos):
+                        if str(banco_detectado).lower() in op.lower():
+                            idx_default = i
+                            break
+
+                    conta_sel_pdf = c_b1.selectbox(
+                        "🏦 Selecione/Confirme a Conta Bancária:",
+                        opcoes_bancos,
+                        index=idx_default,
+                        key="sb_pdf_banco",
                     )
+
+                    if conta_sel_pdf == "➕ Adicionar Novo Banco...":
+                        conta_final_pdf = c_b2.text_input("Digite o nome do novo banco:", key="txt_novo_banco_pdf")
+                    else:
+                        conta_final_pdf = conta_sel_pdf
 
                     dados_finais = []
                     for item in lancamentos_ia:
@@ -453,7 +504,9 @@ def renderizar_aba_fluxo_caixa():
 
                         dados_finais.append({
                             "mes": mes_calculado,
-                            "data": item.get("data", datetime.now().strftime("%Y-%m-%d")),
+                            "data": item.get(
+                                "data", datetime.now().strftime("%Y-%m-%d")
+                            ),
                             "departamento": "GERAL",
                             "tipo": item.get("tipo", "Despesa"),
                             "categoria": (
@@ -461,11 +514,13 @@ def renderizar_aba_fluxo_caixa():
                                 if item.get("tipo") == "Despesa"
                                 else "Serviço Prestado"
                             ),
-                            "descricao": item.get("descricao", "Lançamento sem nome"),
+                            "descricao": item.get(
+                                "descricao", "Lançamento sem nome"
+                            ),
                             "valor_bruto": float(item.get("valor_bruto", 0.0)),
                             "taxa": 0.0,
                             "valor_liquido": float(item.get("valor_bruto", 0.0)),
-                            "conta_origem": conta_selecionada,
+                            "conta_origem": conta_final_pdf.strip() if conta_final_pdf else "PicPay",
                             "status_pagamento": "🟢 Pago",
                             "nota_fiscal": "⚪ Não se aplica",
                             "status_onvio": "❌ Não enviado",
@@ -473,35 +528,28 @@ def renderizar_aba_fluxo_caixa():
 
                     df_previa = pd.DataFrame(dados_finais)
                     st.dataframe(
-                        df_previa[["data", "tipo", "descricao", "valor_bruto", "conta_origem"]],
+                        df_previa[[
+                            "data",
+                            "tipo",
+                            "descricao",
+                            "valor_bruto",
+                            "conta_origem",
+                        ]],
                         use_container_width=True,
                     )
 
-                    if st.button(
-                        "📥 Aprovar e Injetar Transações da IA", type="primary"
-                    ):
-                        for lancamento in dados_finais:
-                            salvar_lancamento(
-                                lancamento["mes"],
-                                lancamento["data"],
-                                lancamento["departamento"],
-                                lancamento["tipo"],
-                                lancamento["categoria"],
-                                lancamento["descricao"],
-                                lancamento["valor_bruto"],
-                                lancamento["taxa"],
-                                lancamento["valor_liquido"],
-                                lancamento["conta_origem"],
-                                lancamento["status_pagamento"],
-                                lancamento["nota_fiscal"],
-                                lancamento["status_onvio"],
+                    if st.button("📥 Aprovar e Injetar Transações", type="primary"):
+                        if not conta_final_pdf or conta_final_pdf == "➕ Adicionar Novo Banco...":
+                            st.error("Por favor, digite o nome do novo banco antes de injetar.")
+                        else:
+                            with st.spinner("⚡ Salvando em lote instantaneamente..."):
+                                salvar_lancamentos_em_lote(dados_finais)
+                            st.success(
+                                f"Lançamentos da conta '{conta_final_pdf.strip()}' salvos com sucesso!"
                             )
-                        st.success(f"Lançamentos do {conta_selecionada} salvos com sucesso!")
-                        st.rerun()
+                            st.rerun()
                 else:
-                    st.warning(
-                        "A IA não encontrou lançamentos válidos no texto do extrato."
-                    )
+                    st.warning("Não foram encontrados lançamentos válidos no texto do extrato.")
             else:
                 st.error("Não foi possível extrair texto do PDF.")
 
