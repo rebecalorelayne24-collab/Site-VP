@@ -21,7 +21,7 @@ def verificar_credenciais(email, senha):
         usuario = cursor.fetchone()
     except sqlite3.OperationalError as e:
         conn.close()
-        return {"sucesso": False, "mensagem": f"Erro de estrutura no banco de dados: {e}"}
+        return {"sucesso": False, "mensagem": f"Erro na tabela do banco de dados: {e}"}
     
     conn.close()
     
