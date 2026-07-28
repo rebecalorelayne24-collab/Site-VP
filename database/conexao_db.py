@@ -1,18 +1,16 @@
 import sqlite3
 import os
 
-# Caminho centralizado do banco de dados
 DB_PATH = 'database/financeiro_v2.db'
 
 def inicializar_banco_dados():
-    # Garante que a pasta 'database' exista
     if not os.path.exists('database'):
         os.makedirs('database')
         
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # 1. Tabela de Usuários Completa
+    # Tabela de Usuários Completa
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,69 +18,47 @@ def inicializar_banco_dados():
             senha TEXT NOT NULL,
             nome TEXT NOT NULL,
             departamento TEXT DEFAULT 'Geral',
+            cargo TEXT DEFAULT 'Membro',
+            foto_base64 TEXT,
             primeiro_login INTEGER DEFAULT 0,
             status TEXT DEFAULT 'Ativo'
         )
     ''')
+
+    # Garantir colunas caso a tabela já tenha sido criada sem elas
+    colunas_desejadas = [
+        ("cargo", "TEXT DEFAULT 'Membro'"),
+        ("foto_base64", "TEXT")
+    ]
+    for col, tipo in colunas_desejadas:
+        try:
+            cursor.execute(f"ALTER TABLE usuarios ADD COLUMN {col} {tipo}")
+        except sqlite3.OperationalError:
+            pass # Coluna já existe
     
-    # 2. Tabela do Fluxo de Caixa Geral
+    # Tabela de Fluxo de Caixa
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mes TEXT,
-            data TEXT,
-            departamento TEXT,
-            tipo TEXT,
-            categoria TEXT,
-            descricao TEXT,
-            valor_bruto REAL,
-            taxa REAL,
-            valor_liquido REAL,
-            conta_origem TEXT,
-            status_pagamento TEXT,
-            nota_fiscal TEXT,
-            status_envio TEXT,
-            comprovante TEXT,
-            conta TEXT
+            mes TEXT, data TEXT, departamento TEXT, tipo TEXT,
+            categoria TEXT, descricao TEXT, valor_bruto REAL,
+            taxa REAL, valor_liquido REAL, conta_origem TEXT,
+            status_pagamento TEXT, nota_fiscal TEXT, status_envio TEXT,
+            comprovante TEXT, conta TEXT
         )
     ''')
 
-    # 3. Tabela de Eventos
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS eventos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome_evento TEXT,
-            data_evento TEXT,
-            orcamento_previsto REAL,
-            custo_real REAL,
-            status TEXT
-        )
-    ''')
-
-    # 4. Tabela de Leads
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS leads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT,
-            empresa TEXT,
-            email TEXT,
-            telefone TEXT,
-            status TEXT,
-            valor_estimado REAL
-        )
-    ''')
-    
-    # Inserção direta dos usuários administradores
+    # Inserção de diretores
     usuarios_iniciais = [
-        ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 0, 'Ativo'),
-        ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 0, 'Ativo')
+        ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 'Diretor(a)', 0, 'Ativo'),
+        ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 'Diretor(a)', 0, 'Ativo')
     ]
     
-    for email, senha, nome, departamento, primeiro_login, status in usuarios_iniciais:
+    for email, senha, nome, dep, cargo, p_login, status in usuarios_iniciais:
         cursor.execute('''
-            INSERT OR REPLACE INTO usuarios (email, senha, nome, departamento, primeiro_login, status)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (email.strip().lower(), senha, nome, departamento, primeiro_login, status))
+            INSERT OR REPLACE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (email.strip().lower(), senha, nome, dep, cargo, p_login, status))
         
     conn.commit()
     conn.close()
