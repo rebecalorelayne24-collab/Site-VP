@@ -2,6 +2,7 @@ import io
 import os
 import sqlite3
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
@@ -10,6 +11,12 @@ import streamlit as st
 from modulos.fluxo_caixa import salvar_lancamento
 
 DB_PATH = "database/financeiro_v2.db"
+FUSO_BR = ZoneInfo("America/Sao_Paulo")
+
+
+def obter_agora_br():
+    """Retorna o datetime atual no fuso horário de Brasília."""
+    return datetime.now(FUSO_BR)
 
 
 def inicializar_banco_eventos():
@@ -20,7 +27,6 @@ def inicializar_banco_eventos():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Tabela de Lista de Eventos (Permite adicionar dinamicamente)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cadastro_eventos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +34,6 @@ def inicializar_banco_eventos():
         )
     """)
 
-    # Inserção de eventos padrão se estiver vazia
     cursor.execute("SELECT COUNT(*) FROM cadastro_eventos")
     if cursor.fetchone()[0] == 0:
         eventos_padrao = [
@@ -41,7 +46,6 @@ def inicializar_banco_eventos():
             "INSERT INTO cadastro_eventos (nome) VALUES (?)", eventos_padrao
         )
 
-    # Tabela de Custos
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS custos_eventos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +57,6 @@ def inicializar_banco_eventos():
         )
     """)
 
-    # Garantir coluna status em custos
     cursor.execute("PRAGMA table_info(custos_eventos)")
     colunas_custos = [col[1] for col in cursor.fetchall()]
     if "status" not in colunas_custos:
@@ -61,7 +64,6 @@ def inicializar_banco_eventos():
             "ALTER TABLE custos_eventos ADD COLUMN status TEXT DEFAULT '🟢 Pago'"
         )
 
-    # Tabela de Patrocínios
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS patrocinios_eventos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,7 +74,6 @@ def inicializar_banco_eventos():
         )
     """)
 
-    # Tabela Sympla
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS sympla_consolidado (
             evento TEXT PRIMARY KEY,
@@ -83,7 +84,6 @@ def inicializar_banco_eventos():
         )
     """)
 
-    # Tabela do Fluxo de Caixa Geral (garante que consultas ao DDA não falhem)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,18 +108,17 @@ def inicializar_banco_eventos():
 
 
 def obter_cor_evento(evento_nome):
-    """Retorna uma cor de destaque hex com base na marca do evento."""
     ev_upper = evento_nome.upper()
     if "DDA" in ev_upper:
-        return "#C71585", "#FDF2F8"  # Magenta Açaí
+        return "#C71585", "#FDF2F8"
     elif "SEFARM" in ev_upper:
-        return "#008080", "#F0FDF4"  # Verde Farmácia
+        return "#008080", "#F0FDF4"
     elif "SIMCOM" in ev_upper:
-        return "#8A2BE2", "#FAF5FF"  # Roxo Cosméticos
+        return "#8A2BE2", "#FAF5FF"
     elif "JOFARM" in ev_upper:
-        return "#1E90FF", "#EFF6FF"  # Azul Executivo
+        return "#1E90FF", "#EFF6FF"
     else:
-        return "#FF1493", "#FFF0F5"  # Rosa Institucional Padrão
+        return "#FF1493", "#FFF0F5"
 
 
 def gerar_excel_didatico(
@@ -135,7 +134,6 @@ def gerar_excel_didatico(
     df_c,
     df_p,
 ):
-    """Gera um relatório profissional completo no Excel com Capa, Dashboard, KPIs, Gráficos e Formatação em A4."""
     buffer = io.BytesIO()
 
     cor_primaria, cor_fundo_suave = obter_cor_evento(evento)
@@ -143,7 +141,8 @@ def gerar_excel_didatico(
     total_custos = custos_pagos + custos_orcados
     roi = ((lucro / total_custos) * 100) if total_custos > 0 else 0.0
 
-    # Parecer Automático
+    agora = obter_agora_br()
+
     if lucro > 0:
         parecer_texto = (
             f"🟢 PROJETO SUPERAVITÁRIO: O evento apresentou desempenho excelente, gerando R$ {lucro:,.2f} de lucro líquido "
@@ -160,9 +159,6 @@ def gerar_excel_didatico(
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         workbook = writer.book
 
-        # -------------------------------------------------------------
-        # 🎨 FORMATOS DE ESTILO
-        # -------------------------------------------------------------
         fmt_capa_titulo = workbook.add_format({
             "bold": True, "font_name": "Arial", "font_size": 18,
             "font_color": "#FFFFFF", "fg_color": cor_primaria,
@@ -245,22 +241,16 @@ def gerar_excel_didatico(
             "font_color": "#64748B", "align": "center", "valign": "vcenter",
         })
 
-        # =============================================================
-        # 🟢 ABA 1: CAPA & DASHBOARD EXECUTIVO
-        # =============================================================
         ws_dash = workbook.add_worksheet("📊 Dashboard Executivo")
         ws_dash.hide_gridlines(2)
         ws_dash.set_landscape()
-        ws_dash.set_paper(9)  # Papel A4
+        ws_dash.set_paper(9)
 
-        # Banner do Cabeçalho
         ws_dash.merge_range("B2:H3", f"FARMÁCIA JR. — RELATÓRIO EXECUTIVO", fmt_capa_titulo)
-        ws_dash.merge_range("B4:H4", f"Projeto: {evento}  |  Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')}", fmt_capa_sub)
+        ws_dash.merge_range("B4:H4", f"Projeto: {evento}  |  Gerado em {agora.strftime('%d/%m/%Y às %H:%M')}", fmt_capa_sub)
 
-        # Seção KPIs
         ws_dash.write("B6", "📌 INDICADORES CHAVE DE DESEMPENHO (KPIs)", fmt_secao_titulo)
 
-        # Cards
         kpis = [
             ("Faturamento Bruto", bruto, fmt_kpi_card_valor, "B", "C"),
             ("Receita Líquida + Patrocínios", receita_total, fmt_kpi_card_valor, "D", "E"),
@@ -271,15 +261,12 @@ def gerar_excel_didatico(
             ws_dash.merge_range(f"{c1}7:{c2}7", titulo.upper(), fmt_kpi_card_titulo)
             ws_dash.merge_range(f"{c1}8:{c2}8", valor, fmt_v)
 
-        # Card Especial de Lucro
         ws_dash.merge_range("H7:H7", "LUCRO LÍQUIDO", fmt_kpi_card_titulo)
         fmt_lucro_usa = fmt_kpi_lucro_positivo if lucro >= 0 else fmt_kpi_lucro_negativo
         ws_dash.write("H8", lucro, fmt_lucro_usa)
 
-        # Quadro de Mapeamento Numérico do Gráfico
         ws_dash.write("B11", "📊 COMPOSIÇÃO FINANCEIRA DO PROJETO", fmt_secao_titulo)
 
-        # Tabela oculta de suporte ao gráfico
         ws_dash.write("B13", "Categoria", fmt_tabela_cabecalho)
         ws_dash.write("C13", "Valor (R$)", fmt_tabela_cabecalho)
 
@@ -295,7 +282,6 @@ def gerar_excel_didatico(
             ws_dash.write(13 + i, 1, rotulo, fmt_celula)
             ws_dash.write(13 + i, 2, val, fmt_moeda)
 
-        # Inserção do Gráfico Nativo do Excel
         chart = workbook.add_chart({"type": "column"})
         chart.add_series({
             "name": "Valores R$",
@@ -309,25 +295,18 @@ def gerar_excel_didatico(
         chart.set_size({"width": 460, "height": 220})
         ws_dash.insert_chart("D11", chart)
 
-        # Parecer Automático da Diretoria
         ws_dash.write("B20", "💬 PARECER DE DESEMPENHO FINANCEIRO", fmt_secao_titulo)
         ws_dash.merge_range("B21:H22", parecer_texto, fmt_parecer)
 
-        # Resumo Estatístico Secundário
         ws_dash.write("B24", f"• Ponto de Equilíbrio (Break-Even): {break_even}", fmt_celula)
         ws_dash.write("E24", f"• Ingressos/Copos Vendidos: {ing_totais} un", fmt_celula)
         ws_dash.write("G24", f"• Retorno s/ Investimento (ROI): {roi:.1f}%", fmt_celula)
 
-        # Rodapé Institucional
         ws_dash.merge_range("B26:H26", "Farmácia Jr. UFMG — Gestão Financeira e Estratégica de Projetos", fmt_rodape)
 
-        # Adjusts
         ws_dash.set_column("A:A", 3)
         ws_dash.set_column("B:H", 18)
 
-        # =============================================================
-        # 🟡 ABA 2: DETALHAMENTO DE CUSTOS
-        # =============================================================
         df_c_export = df_c.copy()
         if not df_c_export.empty and "evento" in df_c_export.columns:
             df_c_export = df_c_export.drop(columns=["evento", "id"], errors="ignore")
@@ -340,7 +319,6 @@ def gerar_excel_didatico(
         ws_custos = workbook.add_worksheet("💸 Custos Operacionais")
         ws_custos.set_landscape()
 
-        # Cabeçalho
         for col_num, value in enumerate(df_c_export.columns):
             ws_custos.write(0, col_num, value, fmt_tabela_cabecalho)
 
@@ -356,15 +334,11 @@ def gerar_excel_didatico(
                 else:
                     ws_custos.write(row_num + 1, col_num, str(val if val is not None else ""), f_txt)
 
-        # Autoajuste
         for col_num, col_name in enumerate(df_c_export.columns):
             max_len = max((df_c_export[col_name].astype(str).map(len).max() if not df_c_export.empty else 0), len(col_name)) + 6
             ws_custos.set_column(col_num, col_num, min(max_len, 45))
         ws_custos.freeze_panes(1, 0)
 
-        # =============================================================
-        # 🔵 ABA 3: PATROCÍNIOS CAPTADOS
-        # =============================================================
         df_p_export = df_p.copy()
         if not df_p_export.empty and "evento" in df_p_export.columns:
             df_p_export = df_p_export.drop(columns=["evento", "id"], errors="ignore")
@@ -414,7 +388,6 @@ def renderizar_gestao_eventos():
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
     ]
 
-    # 1. Carregar lista dinâmica de eventos
     conn = sqlite3.connect(DB_PATH)
     df_lista_ev = pd.read_sql_query(
         "SELECT nome FROM cadastro_eventos ORDER BY id ASC", conn
@@ -428,7 +401,6 @@ def renderizar_gestao_eventos():
         "Selecione o Evento para Planejamento/Gestão:", lista_opcoes
     )
 
-    # ➕ Criar Novo Evento Dinamicamente
     with c_ev2:
         st.write("")
         st.write("")
@@ -523,7 +495,6 @@ def renderizar_gestao_eventos():
 
         conn.close()
 
-        # Separação de Custos Pagos vs Orçados
         custos_pagos = (
             df_custos[df_custos["status"] == "🟢 Pago"]["valor"].sum()
             if not df_custos.empty
@@ -546,7 +517,6 @@ def renderizar_gestao_eventos():
             (lucro_liquido / receita_total * 100) if receita_total > 0 else 0.0
         )
 
-        # Break-Even
         preco_medio = (
             (bruto_calculado / ingressos_totais) * (1 - (taxa_sympla_perc / 100))
             if ingressos_totais > 0
@@ -592,9 +562,6 @@ def renderizar_gestao_eventos():
             ])
         )
 
-        # =======================================================================
-        # ABA 1: RESUMO EXEC COM GRÁFICOS VISUAIS
-        # =======================================================================
         with tab_dashboard:
             st.markdown(f"### 📋 Painel de Desempenho — {tag_evento}")
 
@@ -674,14 +641,11 @@ def renderizar_gestao_eventos():
             st.download_button(
                 label="📥 Exportar Relatório Executivo em Excel (.xlsx)",
                 data=dados_excel,
-                file_name=f"Relatorio_Executivo_{tag_evento.lower()}_{datetime.now().strftime('%Y')}.xlsx",
+                file_name=f"Relatorio_Executivo_{tag_evento.lower()}_{obter_agora_br().strftime('%Y-%m-%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
 
-        # =======================================================================
-        # ABA 2: VENDAS / SYMPLA
-        # =======================================================================
         with tab_sympla:
             if is_dda:
                 st.markdown("### 📊 Metas de Vendas do DDA")
@@ -762,9 +726,6 @@ def renderizar_gestao_eventos():
                         st.success("Dados do Sympla salvos!")
                         st.rerun()
 
-        # =======================================================================
-        # ABA 3: CUSTOS OPERACIONAIS (COM STATUS PAGO VS ORÇADO)
-        # =======================================================================
         with tab_custos:
             st.markdown("### Orçamento e Custos de Infraestrutura")
 
@@ -782,9 +743,9 @@ def renderizar_gestao_eventos():
 
                 if st.button("Gravar Linha de Custo"):
                     if desc_c and val_c > 0:
-                        dt_atual = datetime.now()
-                        hoje = dt_atual.strftime("%Y-%m-%d")
-                        mes_nome = lista_meses[dt_atual.month - 1]
+                        agora = obter_agora_br()
+                        hoje = agora.strftime("%Y-%m-%d")
+                        mes_nome = lista_meses[agora.month - 1]
                         desc_completa = f"Gasto {tag_evento}: {desc_c}"
 
                         conn = sqlite3.connect(DB_PATH)
@@ -852,9 +813,6 @@ def renderizar_gestao_eventos():
                         st.success("Custo excluído!")
                         st.rerun()
 
-        # =======================================================================
-        # ABA 4: PATROCÍNIOS
-        # =======================================================================
         with tab_patrocinio:
             st.markdown("### Arrecadação Comercial Externa")
 
@@ -869,9 +827,9 @@ def renderizar_gestao_eventos():
 
                 if st.button("Gravar Entrada de Patrocínio"):
                     if emp_p and val_p > 0:
-                        dt_atual = datetime.now()
-                        hoje = dt_atual.strftime("%Y-%m-%d")
-                        mes_nome = lista_meses[dt_atual.month - 1]
+                        agora = obter_agora_br()
+                        hoje = agora.strftime("%Y-%m-%d")
+                        mes_nome = lista_meses[agora.month - 1]
                         desc_completa = f"Patrocínio {tag_evento}: {emp_p}"
 
                         conn = sqlite3.connect(DB_PATH)
@@ -926,9 +884,6 @@ def renderizar_gestao_eventos():
                         st.success("Patrocínio excluído!")
                         st.rerun()
 
-        # =======================================================================
-        # 🧮 SIMULADOR DE INGRESSOS E LOTES
-        # =======================================================================
         with tab_simulador:
             st.markdown("### 🧮 Calculadora de Lotes e Precificação de Ingressos")
             st.caption(
