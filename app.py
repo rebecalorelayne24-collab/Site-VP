@@ -1,18 +1,33 @@
-import streamlit as st
+import os
 import sqlite3
 from datetime import datetime
+import streamlit as st
+import google.generativeai as genai
+
+# --- CONFIGURAÇÃO SEGURA DA API DO GEMINI ---
+# Busca a chave configurada privadamente nos Secrets do Streamlit Cloud
+api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+
+if api_key:
+    os.environ["GEMINI_API_KEY"] = api_key
+    genai.configure(api_key=api_key)
+else:
+    st.warning("⚠️ Chave da API do Gemini não configurada nos Secrets do Streamlit Cloud.")
 
 # --- IMPORTAÇÕES DOS MÓDULOS INTERNOS ---
-from modulos.precificacao import renderizar_aba_precificacao
-from modulos.fluxo_caixa import renderizar_aba_fluxo_caixa, salvar_lancamento
 from database.conexao_db import inicializar_banco_dados
+from modulos.dashboard import renderizar_dashboard_geral
 from modulos.equipe import verificar_credenciais
-from modulos.telas_equipe import renderizar_tela_troca_senha, renderizar_gerenciamento_equipe
-from modulos.totem import renderizar_totem  
-from modulos.eventos_grandes import renderizar_gestao_eventos  
-from modulos.gestao_interna import renderizar_gestao_interna  
-from modulos.dashboard import renderizar_dashboard_geral        
+from modulos.eventos_grandes import renderizar_gestao_eventos
+from modulos.fluxo_caixa import renderizar_aba_fluxo_caixa, salvar_lancamento
+from modulos.gestao_interna import renderizar_gestao_interna
 from modulos.leads import renderizar_modulo_leads
+from modulos.precificacao import renderizar_aba_precificacao
+from modulos.telas_equipe import (
+    renderizar_gerenciamento_equipe,
+    renderizar_tela_troca_senha,
+)
+from modulos.totem import renderizar_totem
 
 # Garante a inicialização do banco de dados
 inicializar_banco_dados()
@@ -21,11 +36,12 @@ st.set_page_config(
     page_title="Plataforma VP — Farmácia Jr.",
     page_icon="🦩",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # --- DESIGN SYSTEM EXCLUSIVO (UI/UX VP FARMÁCIA JR.) ---
-st.markdown("""
+st.markdown(
+    """
     <style>
         /* 1. CONFIGURAÇÃO GERAL DA PÁGINA */
         html, body, [data-testid="stAppViewContainer"] {
@@ -137,7 +153,9 @@ st.markdown("""
             border-bottom-color: #E6007E !important;
         }
     </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Inicializa as variáveis de sessão
 if "logado" not in st.session_state:
@@ -156,46 +174,64 @@ if "departamento_usuario" not in st.session_state:
 # =======================================================================
 if not st.session_state.logado:
     col1, col2, col3 = st.columns([1, 2, 1])
-    
+
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("<h1 style='text-align: center;'>🦩 Plataforma VP</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #6C757D;'>Farmácia Jr. — Gestão Financeira & Operacional</p>", unsafe_allow_html=True)
+        st.markdown(
+            "<h1 style='text-align: center;'>🦩 Plataforma VP</h1>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='text-align: center; color: #6C757D;'>Farmácia Jr. —"
+            " Gestão Financeira & Operacional</p>",
+            unsafe_allow_html=True,
+        )
         st.markdown("---")
-        
-        email_input = st.text_input("E-mail Institucional:", placeholder="seu-email@farmaciajr.com")
-        senha_input = st.text_input("Senha:", type="password", placeholder="••••••••")
-        
+
+        email_input = st.text_input(
+            "E-mail Institucional:", placeholder="seu-email@farmaciajr.com"
+        )
+        senha_input = st.text_input(
+            "Senha:", type="password", placeholder="••••••••"
+        )
+
         st.markdown("<br>", unsafe_allow_html=True)
         botao_login = st.button("Acessar Plataforma")
-        
+
         if botao_login:
             if email_input and senha_input:
                 email_ajustado = email_input.strip().lower()
                 checagem = verificar_credenciais(email_ajustado, senha_input)
-                
+
                 if checagem["sucesso"]:
                     st.session_state.logado = True
                     st.session_state.email_usuario = email_ajustado
                     st.session_state.nome_usuario = checagem["nome"]
                     st.session_state.primeiro_login = checagem["primeiro_login"]
-                    st.session_state.departamento_usuario = checagem.get("departamento", "Geral")
+                    st.session_state.departamento_usuario = checagem.get(
+                        "departamento", "Geral"
+                    )
                     st.rerun()
                 else:
                     st.error(checagem["mensagem"])
             else:
-                st.error("Por favor, informe seu e-mail e sua senha para entrar.")
+                st.error(
+                    "Por favor, informe seu e-mail e sua senha para entrar."
+                )
 
 # =======================================================================
 # --- TELA 2: TROCA DE SENHA (PRIMEIRO ACESSO) ---
 # =======================================================================
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
-    conn = sqlite3.connect('database/financeiro_v2.db')
+    conn = sqlite3.connect("database/financeiro_v2.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT primeiro_login FROM usuarios WHERE email = ?", (st.session_state.email_usuario,))
+    cursor.execute(
+        "SELECT primeiro_login FROM usuarios WHERE email = ?",
+        (st.session_state.email_usuario,),
+    )
     status_atual = cursor.fetchone()[0]
     conn.close()
-    
+
     if status_atual == 1:
         renderizar_tela_troca_senha(st.session_state.email_usuario)
     else:
@@ -207,29 +243,52 @@ elif st.session_state.logado and st.session_state.primeiro_login == 1:
 # =======================================================================
 else:
     # Sidebar Superior
-    st.sidebar.markdown("<h2 style='color: #FFFFFF; margin-bottom: 0px;'>🦩 Setor VP</h2>", unsafe_allow_html=True)
-    st.sidebar.markdown(f"<p style='color: #E6007E !important; font-weight: bold;'>Olá, {st.session_state.nome_usuario}!</p>", unsafe_allow_html=True)
-    st.sidebar.markdown(f"<small style='color: #ADB5BD;'>Setor: {st.session_state.departamento_usuario}</small>", unsafe_allow_html=True)
-    st.sidebar.markdown("<hr style='border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
-    
+    st.sidebar.markdown(
+        "<h2 style='color: #FFFFFF; margin-bottom: 0px;'>🦩 Setor VP</h2>",
+        unsafe_allow_html=True,
+    )
+    st.sidebar.markdown(
+        "<p style='color: #E6007E !important; font-weight: bold;'>Olá,"
+        f" {st.session_state.nome_usuario}!</p>",
+        unsafe_allow_html=True,
+    )
+    st.sidebar.markdown(
+        "<small style='color: #ADB5BD;'>Setor:"
+        f" {st.session_state.departamento_usuario}</small>",
+        unsafe_allow_html=True,
+    )
+    st.sidebar.markdown(
+        "<hr style='border-color: rgba(255,255,255,0.1);'>",
+        unsafe_allow_html=True,
+    )
+
     # Opções do Menu
     opcoes_menu = ["Totem de Vendas Express", "Planejamento de Eventos"]
-    
-    if st.session_state.departamento_usuario in ["VP", "Presidência"] or st.session_state.email_usuario in ["vice-presidencia@farmaciajr.com", "presidencia@farmaciajr.com"]:
+
+    if st.session_state.departamento_usuario in [
+        "VP",
+        "Presidência",
+    ] or st.session_state.email_usuario in [
+        "vice-presidencia@farmaciajr.com",
+        "presidencia@farmaciajr.com",
+    ]:
         opcoes_menu = [
-            "Dashboard Geral", 
-            "Fluxo de Caixa", 
-            "Planejamento de Eventos", 
-            "Contratos e Demandas Internas", 
+            "Dashboard Geral",
+            "Fluxo de Caixa",
+            "Planejamento de Eventos",
+            "Contratos e Demandas Internas",
             "Pipeline de Leads",
-            "Calculadora de Precificação", 
-            "Totem de Vendas Express", 
-            "Gerenciar Equipe"
+            "Calculadora de Precificação",
+            "Totem de Vendas Express",
+            "Gerenciar Equipe",
         ]
 
     menu = st.sidebar.radio("Navegação:", opcoes_menu)
 
-    st.sidebar.markdown("<hr style='border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
+    st.sidebar.markdown(
+        "<hr style='border-color: rgba(255,255,255,0.1);'>",
+        unsafe_allow_html=True,
+    )
     if st.sidebar.button("🚪 Encerrar Sessão"):
         st.session_state.logado = False
         st.session_state.email_usuario = ""
