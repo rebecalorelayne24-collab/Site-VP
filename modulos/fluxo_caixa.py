@@ -87,66 +87,67 @@ def salvar_lancamento(
 
 
 def ler_extrato_com_gemini(texto_pdf):
-    """Envia o texto bruto do extrato para o Gemini organizar os dados em JSON."""
+    """Envia o texto do extrato para o Gemini mapear os dados em JSON garantido."""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
     if not api_key:
-        st.error(
-            "Chave GEMINI_API_KEY não encontrada nos Secrets do Streamlit Cloud."
-        )
+        st.error("⚠️ Chave GEMINI_API_KEY não encontrada nos Secrets do Streamlit Cloud.")
+        return []
+
+    if not texto_pdf or len(texto_pdf.strip()) < 10:
+        st.warning("⚠️ O PDF parece estar sem texto editável (pode ser uma imagem digitalizada).")
         return []
 
     try:
         genai.configure(api_key=api_key)
 
-        # Seleciona o modelo atualizado gemini-2.5-flash com fallbacks de compatibilidade
-        modelos_disponiveis = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash-latest",
-        ]
-
-        model = None
-        for nome_modelo in modelos_disponiveis:
-            try:
-                model = genai.GenerativeModel(nome_modelo)
-                break
-            except Exception:
-                continue
-
-        if not model:
-            model = genai.GenerativeModel("gemini-2.5-flash")
-
         prompt = f"""
-        Você é o assistente financeiro da Farmácia Jr. (Empresa Júnior de Farmácia da UFMG).
-        Sua tarefa é ler o texto bruto de um extrato bancário abaixo e extrair TODOS os lançamentos válidos de entrada e saída.
-        Ignore linhas de saldos, juros de saldo, ou informativas.
-        
-        Para cada lançamento válido, identifique:
-        - data: No formato AAAA-MM-DD (Se o extrato não tiver o ano, use o ano atual de {datetime.now().year}).
-        - tipo: "Receita" para entradas de dinheiro ou "Despesa" para saídas/pagamentos.
-        - descricao: O nome da operação de forma limpa.
-        - valor_bruto: O valor numérico positivo (float), sem R$ ou pontos de milhar.
+        Você é um assistente financeiro sênior da Farmácia Jr. (UFMG).
+        Analise o texto deste extrato bancário e extraia TODOS os lançamentos válidos de entrada e saída.
+        Ignore linhas de saldos, saques sem descrição, rendimentos informativos ou tarifas zeradas.
 
-        Retorne os dados ESTREITAMENTE no formato JSON, como uma lista de objetos, exatamente assim:
+        Para cada lançamento válido, retorne obrigatoriamente uma lista de objetos JSON contendo:
+        - data: formato YYYY-MM-DD (Se não tiver o ano no texto, assuma o ano atual de {datetime.now().year})
+        - tipo: "Receita" (para PIX recebidos, depósitos, créditos) ou "Despesa" (para PIX enviados, pagamentos, boletos, tarifas)
+        - descricao: descrição limpa da transação
+        - valor_bruto: valor numérico float positivo (ex: 150.50)
+
+        Exemplo de resposta esperada:
         [
-          {{"data": "2026-03-15", "tipo": "Receita", "descricao": "PIX RECEBIDO - JOAO SILVA", "valor_bruto": 150.00}},
-          {{"data": "2026-03-16", "tipo": "Despesa", "descricao": "COMPRA DE JALECOS", "valor_bruto": 450.50}}
+            {{"data": "2026-03-15", "tipo": "Receita", "descricao": "PIX RECEBIDO - JOAO SILVA", "valor_bruto": 150.00}},
+            {{"data": "2026-03-16", "tipo": "Despesa", "descricao": "COMPRA DE JALECOS", "valor_bruto": 450.50}}
         ]
 
         Texto do extrato:
         {texto_pdf}
         """
 
-        response = model.generate_content(prompt)
-        resposta_texto = response.text.strip()
+        # Configuração que força a resposta em JSON nativo
+        try:
+            model = genai.GenerativeModel(
+                "gemini-1.5-flash",
+                generation_config={"response_mime_type": "application/json"}
+            )
+            response = model.generate_content(prompt)
+            resposta_texto = response.text.strip()
+        except Exception:
+            # Fallback caso a versão da lib não suporte o parâmetro de mime_type
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content(prompt)
+            resposta_texto = response.text.strip()
 
+        # Limpeza caso o modelo inclua formatação Markdown extra
         if "```" in resposta_texto:
             resposta_texto = resposta_texto.split("```")[1]
             if resposta_texto.startswith("json"):
                 resposta_texto = resposta_texto[4:]
 
-        return json.loads(resposta_texto.strip())
+        dados = json.loads(resposta_texto.strip())
+        return dados if isinstance(dados, list) else []
+
+    except json.JSONDecodeError as e:
+        st.error(f"Erro ao converter a resposta da IA em lista financeira: {e}")
+        return []
     except Exception as e:
         st.error(f"Erro no processamento da IA: {e}")
         return []
@@ -366,82 +367,89 @@ def renderizar_aba_fluxo_caixa():
         )
         if arquivo_pdf is not None:
             with st.spinner("🤖 Extraindo texto do documento..."):
-                reader = PdfReader(arquivo_pdf)
-                texto_bruto = ""
-                for page in reader.pages:
-                    texto_bruto += page.extract_text() + "\n"
+                try:
+                    reader = PdfReader(arquivo_pdf)
+                    texto_bruto = ""
+                    for page in reader.pages:
+                        texto_extraido = page.extract_text()
+                        if texto_extraido:
+                            texto_bruto += texto_extraido + "\n"
+                except Exception as e:
+                    st.error(f"Erro ao ler arquivo PDF: {e}")
+                    texto_bruto = ""
 
-            with st.spinner("🧠 O Gemini está interpretando as transações..."):
-                lancamentos_ia = ler_extrato_com_gemini(texto_bruto)
+            if texto_bruto:
+                with st.spinner("🧠 O Gemini está interpretando as transações..."):
+                    lancamentos_ia = ler_extrato_com_gemini(texto_bruto)
 
-            if lancamentos_ia:
-                st.write(
-                    f"📋 **{len(lancamentos_ia)} lançamentos mapeados com sucesso pela"
-                    " IA:**"
-                )
-
-                dados_finais = []
-                for item in lancamentos_ia:
-                    try:
-                        dt_obj = datetime.strptime(item["data"], "%Y-%m-%d")
-                        mes_calculado = lista_meses[dt_obj.month - 1]
-                    except Exception:
-                        mes_calculado = "Janeiro"
-
-                    dados_finais.append({
-                        "mes": mes_calculado,
-                        "data": item["data"],
-                        "departamento": "GERAL",
-                        "tipo": item["tipo"],
-                        "categoria": (
-                            "ADM: Operacional"
-                            if item["tipo"] == "Despesa"
-                            else "Serviço Prestado"
-                        ),
-                        "descricao": item["descricao"],
-                        "valor_bruto": float(item["valor_bruto"]),
-                        "taxa": 0.0,
-                        "valor_liquido": float(item["valor_bruto"]),
-                        "conta_origem": "Banco do Brasil",
-                        "status_pagamento": "🟢 Pago",
-                        "nota_fiscal": "⚪ Não se aplica",
-                        "status_onvio": "❌ Não enviado",
-                    })
-
-                df_previa = pd.DataFrame(dados_finais)
-                st.dataframe(
-                    df_previa[["data", "tipo", "descricao", "valor_bruto"]],
-                    use_container_width=True,
-                )
-
-                if st.button(
-                    "📥 Aprovar e Injetar Transações da IA", type="primary"
-                ):
-                    for lancamento in dados_finais:
-                        salvar_lancamento(
-                            lancamento["mes"],
-                            lancamento["data"],
-                            lancamento["departamento"],
-                            lancamento["tipo"],
-                            lancamento["categoria"],
-                            lancamento["descricao"],
-                            lancamento["valor_bruto"],
-                            lancamento["taxa"],
-                            lancamento["valor_liquido"],
-                            lancamento["conta_origem"],
-                            lancamento["status_pagamento"],
-                            lancamento["nota_fiscal"],
-                            lancamento["status_onvio"],
-                        )
-                    st.success(
-                        "Extrato conciliado pela IA e salvo no banco de dados!"
+                if lancamentos_ia:
+                    st.write(
+                        f"📋 **{len(lancamentos_ia)} lançamentos mapeados com sucesso pela IA:**"
                     )
-                    st.rerun()
+
+                    dados_finais = []
+                    for item in lancamentos_ia:
+                        try:
+                            dt_obj = datetime.strptime(item["data"], "%Y-%m-%d")
+                            mes_calculado = lista_meses[dt_obj.month - 1]
+                        except Exception:
+                            mes_calculado = "Janeiro"
+
+                        dados_finais.append({
+                            "mes": mes_calculado,
+                            "data": item.get("data", datetime.now().strftime("%Y-%m-%d")),
+                            "departamento": "GERAL",
+                            "tipo": item.get("tipo", "Despesa"),
+                            "categoria": (
+                                "ADM: Operacional"
+                                if item.get("tipo") == "Despesa"
+                                else "Serviço Prestado"
+                            ),
+                            "descricao": item.get("descricao", "Lançamento sem nome"),
+                            "valor_bruto": float(item.get("valor_bruto", 0.0)),
+                            "taxa": 0.0,
+                            "valor_liquido": float(item.get("valor_bruto", 0.0)),
+                            "conta_origem": "Banco do Brasil",
+                            "status_pagamento": "🟢 Pago",
+                            "nota_fiscal": "⚪ Não se aplica",
+                            "status_onvio": "❌ Não enviado",
+                        })
+
+                    df_previa = pd.DataFrame(dados_finais)
+                    st.dataframe(
+                        df_previa[["data", "tipo", "descricao", "valor_bruto"]],
+                        use_container_width=True,
+                    )
+
+                    if st.button(
+                        "📥 Aprovar e Injetar Transações da IA", type="primary"
+                    ):
+                        for lancamento in dados_finais:
+                            salvar_lancamento(
+                                lancamento["mes"],
+                                lancamento["data"],
+                                lancamento["departamento"],
+                                lancamento["tipo"],
+                                lancamento["categoria"],
+                                lancamento["descricao"],
+                                lancamento["valor_bruto"],
+                                lancamento["taxa"],
+                                lancamento["valor_liquido"],
+                                lancamento["conta_origem"],
+                                lancamento["status_pagamento"],
+                                lancamento["nota_fiscal"],
+                                lancamento["status_onvio"],
+                            )
+                        st.success(
+                            "Extrato conciliado pela IA e salvo no banco de dados!"
+                        )
+                        st.rerun()
+                else:
+                    st.warning(
+                        "A IA não encontrou lançamentos válidos no texto do extrato."
+                    )
             else:
-                st.warning(
-                    "A IA não conseguiu estruturar dados financeiros deste PDF."
-                    " Verifique o arquivo."
-                )
+                st.error("Não foi possível extrair nenhum texto desse PDF. Se for uma imagem digitalizada, tente exportar o extrato original em PDF do seu banco.")
 
     st.markdown("---")
 
