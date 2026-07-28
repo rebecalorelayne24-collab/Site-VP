@@ -116,57 +116,75 @@ def salvar_lancamento(
 
 
 def ler_extrato_com_gemini(texto_pdf):
-    """Lê o extrato com foco em alta velocidade de resposta."""
+    """Lê qualquer extrato identificando inclusive a instituição financeira/banco de origem."""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if api_key:
         api_key = str(api_key).strip().strip('"').strip("'")
 
-    if not api_key or not texto_pdf or len(texto_pdf.strip()) < 10:
+    if not api_key:
+        st.error("⚠️ Chave GEMINI_API_KEY não encontrada nos Secrets do Streamlit Cloud.")
+        return []
+
+    if not texto_pdf or len(texto_pdf.strip()) < 10:
+        st.warning("⚠️ O PDF parece estar sem texto editável.")
         return []
 
     try:
         genai.configure(api_key=api_key)
 
         prompt = f"""
-        Extraia todas as transações deste extrato bancário.
-        Retorne estritamente um array JSON puro no seguinte formato:
+        Você é um assistente financeiro da Farmácia Jr. (UFMG).
+        Analise o texto deste extrato bancário e extraia TODOS os lançamentos válidos de entrada e saída.
+        Alem disso, identifique qual é a instituição bancária do extrato (ex: PicPay, Banco do Brasil, Caixa, Itaú, Nubank).
+        Ignore saldos finais de dia, resumos, CNPJ ou rodapés.
+
+        Retorne obrigatoriamente uma lista JSON no formato puro (sem marcadores adicionais fora do array):
         [
-            {{"data": "2026-06-30", "tipo": "Receita", "descricao": "PIX RECEBIDO - NOME", "valor_bruto": 2.00, "banco": "PicPay"}}
+            {{"data": "2026-06-30", "tipo": "Receita", "descricao": "PIX RECEBIDO - VITORIA FERNANDES PEREIRA", "valor_bruto": 2.00, "banco": "PicPay"}},
+            {{"data": "2026-06-20", "tipo": "Despesa", "descricao": "PIX ENVIADO - AMERICANAS SA", "valor_bruto": 32.99, "banco": "PicPay"}}
         ]
-        Regras:
+
+        Regras de Negócio:
         - data: YYYY-MM-DD
-        - tipo: "Receita" (entradas/+) ou "Despesa" (saídas/-)
-        - valor_bruto: float positivo
-        - Ignore saldos e rodapés.
+        - tipo: "Receita" ou "Despesa"
+        - descricao: Nome limpo da pessoa/empresa + tipo da operação
+        - valor_bruto: número float positivo
+        - banco: Nome do banco identificado no extrato (ex: 'PicPay', 'Banco do Brasil', 'Caixa')
 
         Texto do extrato:
         {texto_pdf}
         """
 
-        # Fila priorizando os modelos ultra-rápidos
-        modelos_rapidos = [
-            "gemini-1.5-flash-8b",
-            "gemini-2.0-flash",
-            "gemini-flash-latest"
+        modelos_fila = [
+            "gemini-flash-latest",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
         ]
 
-        # Configuração para velocidade máxima (temperatura zero = resposta direta sem devaneios)
-        generation_config = genai.types.GenerationConfig(
-            temperature=0.0
-        )
-
         resposta_texto = None
-        for m in modelos_rapidos:
+        ultimo_erro = None
+        erro_cota = False
+
+        for nome_m in modelos_fila:
             try:
-                model = genai.GenerativeModel(m)
-                res = model.generate_content(prompt, generation_config=generation_config)
+                model = genai.GenerativeModel(nome_m)
+                res = model.generate_content(prompt)
                 if res and res.text:
                     resposta_texto = res.text.strip()
                     break
-            except Exception:
+            except Exception as err:
+                msg = str(err)
+                ultimo_erro = msg
+                if "429" in msg or "quota" in msg.lower():
+                    erro_cota = True
                 continue
 
         if not resposta_texto:
+            if erro_cota:
+                st.error("⏳ A cota gratuita da sua API Key foi excedida.")
+            else:
+                st.error(f"⚠️ Erro ao comunicar com a IA: {ultimo_erro}")
             return []
 
         if "```" in resposta_texto:
@@ -182,8 +200,11 @@ def ler_extrato_com_gemini(texto_pdf):
         dados = json.loads(resposta_texto.strip())
         return dados if isinstance(dados, list) else []
 
+    except json.JSONDecodeError as e:
+        st.error(f"A IA não formatou a lista JSON corretamente: {e}")
+        return []
     except Exception as e:
-        st.error(f"Erro no processamento rápido: {e}")
+        st.error(f"Erro no processamento: {e}")
         return []
 
 
@@ -305,7 +326,7 @@ def renderizar_aba_fluxo_caixa():
         "<h2 style='text-align: center; color: #C71585;'>📊 Fluxo de Caixa Geral — Farmácia Jr.</h2>",
         unsafe_allow_html=True,
     )
-    st.write("Gerencie os registros financeiros de forma manual ou por IA rápida.")
+    st.write("Gerencie os registros financeiros de forma manual ou por IA.")
 
     lista_meses = [
         "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -319,7 +340,7 @@ def renderizar_aba_fluxo_caixa():
     conn.close()
 
     aba_manual, aba_pdf = st.tabs(
-        ["➕ Registro Manual", "⚡ Importar por IA Rápida (PDF)"]
+        ["➕ Registro Manual", "🤖 Importar por IA (PDF)"]
     )
 
     with aba_manual:
@@ -374,8 +395,8 @@ def renderizar_aba_fluxo_caixa():
                     st.rerun()
 
     with aba_pdf:
-        st.markdown("#### ⚡ Leitura Cognitiva Ultra-Rápida de Extratos")
-        st.caption("Faça o upload do PDF. O modelo mais leve e rápido processará o documento em segundos.")
+        st.markdown("#### 🤖 Leitura Cognitiva de Extratos com Gemini")
+        st.caption("Faça o upload do PDF. O Gemini detectará o banco, datas e valores automaticamente.")
 
         arquivo_pdf = st.file_uploader(
             "Escolha o arquivo do Extrato (.pdf)",
@@ -383,7 +404,7 @@ def renderizar_aba_fluxo_caixa():
             key="uploader_ia_fluxo",
         )
         if arquivo_pdf is not None:
-            with st.spinner("⚡ Lendo e interpretando extrato em alta velocidade..."):
+            with st.spinner("🤖 Extraindo texto do documento..."):
                 try:
                     reader = PdfReader(arquivo_pdf)
                     texto_bruto = ""
@@ -396,13 +417,15 @@ def renderizar_aba_fluxo_caixa():
                     texto_bruto = ""
 
             if texto_bruto:
-                lancamentos_ia = ler_extrato_com_gemini(texto_bruto)
+                with st.spinner("🧠 O Gemini está interpretando as transações..."):
+                    lancamentos_ia = ler_extrato_com_gemini(texto_bruto)
 
                 if lancamentos_ia:
                     st.write(
-                        f"📋 **{len(lancamentos_ia)} lançamentos mapeados em tempo recorde:**"
+                        f"📋 **{len(lancamentos_ia)} lançamentos mapeados pela IA:**"
                     )
 
+                    # Tenta pegar o banco detectado pela IA na primeira transação
                     banco_detectado = (
                         lancamentos_ia[0].get("banco", "PicPay")
                         if lancamentos_ia
@@ -411,12 +434,12 @@ def renderizar_aba_fluxo_caixa():
 
                     c_b1, c_b2 = st.columns([2, 2])
                     conta_selecionada = c_b1.selectbox(
-                        "🏦 Selecione/Confirme a Conta Bancária:",
-                        ["PicPay", "Banco do Brasil", "Caixa", "Itaú", "Nubank", "Cora", "Banco BTG"],
+                        "🏦 Selecione/Confirme a Conta Bancária das transações:",
+                        ["PicPay", "Banco do Brasil", "Caixa", "Itaú", "Nubank"],
                         index=(
                             0
-                            if "picpay" in str(banco_detectado).lower()
-                            else (1 if "brasil" in str(banco_detectado).lower() else 0)
+                            if "picpay" in banco_detectado.lower()
+                            else (1 if "brasil" in banco_detectado.lower() else 0)
                         ),
                     )
 
@@ -455,7 +478,7 @@ def renderizar_aba_fluxo_caixa():
                     )
 
                     if st.button(
-                        "📥 Aprovar e Injetar Transações", type="primary"
+                        "📥 Aprovar e Injetar Transações da IA", type="primary"
                     ):
                         for lancamento in dados_finais:
                             salvar_lancamento(
@@ -476,7 +499,9 @@ def renderizar_aba_fluxo_caixa():
                         st.success(f"Lançamentos do {conta_selecionada} salvos com sucesso!")
                         st.rerun()
                 else:
-                    st.warning("Não foram encontrados lançamentos válidos no texto do extrato.")
+                    st.warning(
+                        "A IA não encontrou lançamentos válidos no texto do extrato."
+                    )
             else:
                 st.error("Não foi possível extrair texto do PDF.")
 
