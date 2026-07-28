@@ -1,10 +1,9 @@
 import os
 import sqlite3
-from datetime import datetime
 import streamlit as st
 import google.generativeai as genai
 
-# Configuração da página e layout
+# 1. Configuração da página (deve ser o primeiro comando Streamlit)
 st.set_page_config(
     page_title="Plataforma VP — Farmácia Jr.",
     page_icon="🦩",
@@ -12,9 +11,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- 1. CONFIGURAÇÃO DA API DE IA EM CACHE (RODA APENAS UMA VEZ) ---
+# 2. Configuração do Gemini em cache de recurso (inicializa 1x apenas)
 @st.cache_resource
-def inicializar_gemini():
+def setup_gemini():
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if api_key:
         os.environ["GEMINI_API_KEY"] = api_key
@@ -22,29 +21,11 @@ def inicializar_gemini():
         return True
     return False
 
-inicializar_gemini()
+setup_gemini()
 
-# --- IMPORTAÇÕES DOS MÓDULOS INTERNOS ---
-from database.conexao_db import inicializar_banco_dados
-from modulos.dashboard import renderizar_dashboard_geral
-from modulos.equipe import verificar_credenciais
-from modulos.eventos_grandes import renderizar_gestao_eventos
-from modulos.fluxo_caixa import renderizar_aba_fluxo_caixa
-from modulos.gestao_interna import renderizar_gestao_interna
-from modulos.leads import renderizar_modulo_leads
-from modulos.precificacao import renderizar_aba_precificacao
-from modulos.telas_equipe import (
-    renderizar_gerenciamento_equipe,
-    renderizar_tela_troca_senha,
-)
-from modulos.totem import renderizar_totem
-
-# Inicializa banco de dados
-inicializar_banco_dados()
-
-# --- 2. CSS EM CACHE (ALTA PERFORMANCE) ---
+# 3. CSS Otimizado e Cacheado na Memória
 @st.cache_data
-def carregar_css():
+def aplicar_estilo_ui():
     return """
     <style>
         html, body, [data-testid="stAppViewContainer"] {
@@ -54,7 +35,6 @@ def carregar_css():
         }
         [data-testid="stSidebar"] {
             background: linear-gradient(180deg, #E75480 0%, #C71585 100%) !important;
-            border-right: none !important;
             box-shadow: 3px 0 10px rgba(0,0,0,0.05);
         }
         [data-testid="stSidebar"] *, [data-testid="stSidebar"] label, [data-testid="stSidebar"] span, [data-testid="stSidebar"] p {
@@ -63,28 +43,22 @@ def carregar_css():
         }
         [data-testid="stSidebar"] div[role="radiogroup"] > label {
             background-color: rgba(255, 255, 255, 0.15) !important;
-            padding: 10px 14px !important;
-            border-radius: 10px !important;
-            margin-bottom: 6px !important;
+            padding: 8px 12px !important;
+            border-radius: 8px !important;
+            margin-bottom: 4px !important;
             border: 1px solid rgba(255, 255, 255, 0.2) !important;
         }
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
             background-color: #FFFFFF !important;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
-            border: none !important;
         }
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] span {
             color: #C71585 !important;
             font-weight: bold !important;
         }
-        div[data-baseweb="input"] {
-            background-color: #FFFFFF !important;
-            border-radius: 10px !important;
-        }
         div[data-baseweb="input"] > div {
             background-color: #FFFFFF !important;
             border: 1.5px solid #FFB6C1 !important;
-            border-radius: 10px !important;
+            border-radius: 8px !important;
         }
         div[data-baseweb="input"] input {
             color: #333333 !important;
@@ -94,15 +68,11 @@ def carregar_css():
         div.stButton > button {
             background: linear-gradient(90deg, #FF69B4 0%, #E75480 100%) !important;
             color: #FFFFFF !important;
-            border-radius: 10px !important;
+            border-radius: 8px !important;
             border: none !important;
             font-weight: 600 !important;
-            padding: 10px 24px !important;
-            box-shadow: 0 4px 10px rgba(231, 84, 128, 0.25) !important;
+            padding: 8px 20px !important;
             width: 100% !important;
-        }
-        div.stButton > button:hover {
-            background: linear-gradient(90deg, #E75480 0%, #C71585 100%) !important;
         }
         h1, h2, h3 {
             color: #C71585 !important;
@@ -111,9 +81,9 @@ def carregar_css():
     </style>
     """
 
-st.markdown(carregar_css(), unsafe_allow_html=True)
+st.markdown(aplicar_estilo_ui(), unsafe_allow_html=True)
 
-# Gerenciamento de sessão
+# Inicialização rápida das variáveis de sessão
 if "logado" not in st.session_state:
     st.session_state.logado = False
 if "email_usuario" not in st.session_state:
@@ -126,11 +96,15 @@ if "departamento_usuario" not in st.session_state:
     st.session_state.departamento_usuario = "Geral"
 
 # =======================================================================
-# TELA 1: LOGIN
+# FLUXO DE TELA 1: LOGIN (Importações sob demanda)
 # =======================================================================
 if not st.session_state.logado:
-    _, col2, _ = st.columns([1, 2, 1])
+    from database.conexao_db import inicializar_banco_dados
+    from modulos.equipe import verificar_credenciais
+    
+    inicializar_banco_dados()
 
+    _, col2, _ = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.markdown("<h1 style='text-align: center;'>🦩 Plataforma VP</h1>", unsafe_allow_html=True)
@@ -156,10 +130,10 @@ if not st.session_state.logado:
                 else:
                     st.error(checagem["mensagem"])
             else:
-                st.error("Por favor, preencha o e-mail e a senha para entrar.")
+                st.error("Por favor, preencha o e-mail e a senha.")
 
 # =======================================================================
-# TELA 2: TROCA DE SENHA
+# FLUXO DE TELA 2: TROCA DE SENHA
 # =======================================================================
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
     conn = sqlite3.connect("database/financeiro_v2.db")
@@ -169,13 +143,14 @@ elif st.session_state.logado and st.session_state.primeiro_login == 1:
     conn.close()
 
     if resultado and resultado[0] == 1:
+        from modulos.telas_equipe import renderizar_tela_troca_senha
         renderizar_tela_troca_senha(st.session_state.email_usuario)
     else:
         st.session_state.primeiro_login = 0
         st.rerun()
 
 # =======================================================================
-# TELA 3: PAINEL PRINCIPAL
+# FLUXO DE TELA 3: PAINEL PRINCIPAL (LAZY LOADING DE MÓDULOS)
 # =======================================================================
 else:
     st.sidebar.markdown("<h2 style='color: #FFFFFF !important;'>🦩 Setor VP</h2>", unsafe_allow_html=True)
@@ -208,20 +183,35 @@ else:
         st.session_state.departamento_usuario = "Geral"
         st.rerun()
 
-    # Roteamento direto
+    # --- ROTEAMENTO INTELIGENTE (Importa apenas o arquivo da página ativa) ---
     if menu == "Dashboard Geral":
+        from modulos.dashboard import renderizar_dashboard_geral
         renderizar_dashboard_geral()
+        
     elif menu == "Calculadora de Precificação":
+        from modulos.precificacao import renderizar_aba_precificacao
         renderizar_aba_precificacao()
+        
     elif menu == "Fluxo de Caixa":
+        from modulos.fluxo_caixa import renderizar_aba_fluxo_caixa
         renderizar_aba_fluxo_caixa()
+        
     elif menu == "Gerenciar Equipe":
+        from modulos.telas_equipe import renderizar_gerenciamento_equipe
         renderizar_gerenciamento_equipe(st.session_state.email_usuario)
+        
     elif menu == "Planejamento de Eventos":
+        from modulos.eventos_grandes import renderizar_gestao_eventos
         renderizar_gestao_eventos()
+        
     elif menu == "Contratos e Demandas Internas":
+        from modulos.gestao_interna import renderizar_gestao_interna
         renderizar_gestao_interna()
+        
     elif menu == "Pipeline de Leads":
+        from modulos.leads import renderizar_modulo_leads
         renderizar_modulo_leads()
+        
     elif menu == "Totem de Vendas Express":
+        from modulos.totem import renderizar_totem
         renderizar_totem()
