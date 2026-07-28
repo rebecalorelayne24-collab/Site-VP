@@ -59,7 +59,6 @@ def inicializar_banco_leads():
         )
     """)
 
-    # Garante a existência de novas colunas caso a tabela já existisse na versão antiga
     cursor.execute("PRAGMA table_info(leads_vp_auditoria)")
     cols_existentes = [col[1] for col in cursor.fetchall()]
 
@@ -122,7 +121,7 @@ def gerar_dossie_executivo_pdf(row):
 
     styles = getSampleStyleSheet()
 
-    color_primary = colors.HexColor("#C71585")  # Magenta Institucional
+    color_primary = colors.HexColor("#C71585")
     color_dark = colors.HexColor("#1A1A1A")
     color_bg_light = colors.HexColor("#F8FAFC")
 
@@ -359,19 +358,19 @@ def gerar_dossie_executivo_pdf(row):
     story.append(Paragraph(parecer_auto, text_normal))
     story.append(Spacer(1, 20))
 
-    # Campo de Assinatura Institucional
+    # Campo de Assinatura com tags <br/> autoencerráveis corrigidas
     dados_ass = [
         [
             Paragraph(
-                "__________________________________________<br><b>Vice-Presidência"
-                " Financeira</b><br>Farmácia Jr. UFMG",
+                "__________________________________________<br/><b>Vice-Presidência"
+                " Financeira</b><br/>Farmácia Jr. UFMG",
                 ParagraphStyle(
                     "Ass1", parent=text_normal, alignment=1, fontSize=8
                 ),
             ),
             Paragraph(
-                "__________________________________________<br><b>Assessor"
-                " Responsável</b><br>Gerência de Projetos",
+                "__________________________________________<br/><b>Assessor"
+                " Responsável</b><br/>Gerência de Projetos",
                 ParagraphStyle(
                     "Ass2", parent=text_normal, alignment=1, fontSize=8
                 ),
@@ -487,7 +486,6 @@ def renderizar_modulo_leads():
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # Painel de Resumo do Projeto Selecionado
             col_p1, col_p2 = st.columns([1.2, 1])
 
             with col_p1:
@@ -520,7 +518,7 @@ def renderizar_modulo_leads():
                 st.markdown(
                     f"<div style='background-color: {risco_hex}15; border-left:"
                     f" 5px solid {risco_hex}; padding: 10px; border-radius:"
-                    f" 6px; margin-top: 10px;'><b>Status de Risco:</b><br><span"
+                    f" 6px; margin-top: 10px;'><b>Status de Risco:</b><br/><span"
                     f" style='color:{risco_hex};"
                     f" font-weight:bold;'>{risco_l}</span></div>",
                     unsafe_allow_html=True,
@@ -556,7 +554,6 @@ def renderizar_modulo_leads():
                 )
 
             st.markdown("---")
-            # Exclusão com confirmação
             if st.button(
                 f"🗑️ Excluir Dossiê de {empresa_sel}",
                 key=f"del_dos_{row_sel['id']}",
