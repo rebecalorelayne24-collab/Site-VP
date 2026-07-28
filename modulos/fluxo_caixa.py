@@ -87,7 +87,7 @@ def salvar_lancamento(
 
 
 def ler_extrato_com_gemini(texto_pdf):
-    """Envia o texto do extrato para o Gemini mapear os dados em JSON garantido."""
+    """Envia o texto do extrato para o Gemini mapear os dados em JSON com fallback automático entre modelos."""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
     if not api_key:
@@ -122,19 +122,40 @@ def ler_extrato_com_gemini(texto_pdf):
         {texto_pdf}
         """
 
-        # Configuração que força a resposta em JSON nativo
-        try:
-            model = genai.GenerativeModel(
-                "gemini-2.5-flash",
-                generation_config={"response_mime_type": "application/json"}
-            )
-            response = model.generate_content(prompt)
-            resposta_texto = response.text.strip()
-        except Exception:
-            # Fallback caso a versão da lib não suporte o parâmetro de mime_type
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            response = model.generate_content(prompt)
-            resposta_texto = response.text.strip()
+        # Rotação inteligente de modelos para evitar erros 429 de cota excedida
+        modelos_para_tentar = [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash-8b",
+            "gemini-1.5-flash",
+        ]
+
+        resposta_texto = None
+
+        for nome_modelo in modelos_para_tentar:
+            try:
+                model = genai.GenerativeModel(
+                    nome_modelo,
+                    generation_config={"response_mime_type": "application/json"},
+                )
+                response = model.generate_content(prompt)
+                if response and response.text:
+                    resposta_texto = response.text.strip()
+                    break
+            except Exception:
+                # Tenta sem o argumento de mime_type caso não seja suportado pela versão
+                try:
+                    model = genai.GenerativeModel(nome_modelo)
+                    response = model.generate_content(prompt)
+                    if response and response.text:
+                        resposta_texto = response.text.strip()
+                        break
+                except Exception:
+                    continue
+
+        if not resposta_texto:
+            st.error("⚠️ Limite diário de requisições excedido em todos os modelos do Gemini. Aguarde alguns instantes e tente novamente.")
+            return []
 
         # Limpeza caso o modelo inclua formatação Markdown extra
         if "```" in resposta_texto:
