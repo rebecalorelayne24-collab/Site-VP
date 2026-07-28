@@ -190,3 +190,4 @@ def renderizar_dashboard_geral():
         st.plotly_chart(fig_barras, use_container_width=True)
     else:
         st.caption("Nenhuma despesa registrada para exibir o gráfico de barras.")
+        st.caption("Nenhuma despesa registrada para exibir o gráfico de barras.")
