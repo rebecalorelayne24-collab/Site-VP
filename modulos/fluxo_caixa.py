@@ -127,11 +127,7 @@ def ler_extrato_com_gemini(texto_pdf):
         {texto_pdf}
         """
 
-        modelos_validos = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-        ]
+        model = genai.GenerativeModel('gemini-2.5-flash')
 
         resposta_texto = None
         ultimo_erro = None
