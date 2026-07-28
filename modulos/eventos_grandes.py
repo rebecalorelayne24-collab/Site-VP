@@ -120,67 +120,139 @@ def gerar_excel_didatico(
     df_c,
     df_p,
 ):
+    """Gera o relatório em Excel do Evento com a mesma identidade e layout estilizado do Fluxo de Caixa."""
     buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        is_dda = "DDA" in evento
-        label_vendas = (
-            "Vendas Totem (Balcão)" if is_dda else "Ingressos Vendidos (Sympla)"
-        )
-        label_bruto = (
-            "Faturamento Bruto Balcão"
-            if is_dda
-            else "Faturamento Bruto (Sympla)"
-        )
-        label_liq = (
-            "Faturamento Líquido (Sem Taxa)"
-            if is_dda
-            else "Faturamento Líquido (Sympla)"
-        )
 
-        resumo_data = {
-            "Indicador Financeiro": [
-                label_vendas,
-                label_bruto,
-                label_liq,
-                "Aporte de Patrocínios",
-                "Receita Total Realizada",
-                "Custos Operacionais Pagos",
-                "Custos Orçados (Previsão)",
-                "LUCRO LÍQUIDO DO PROJETO",
-                "Ponto de Equilíbrio (Break-Even)",
-            ],
-            "Valor / Métrica": [
-                f"{ing_totais} un",
-                f"R$ {bruto:.2f}",
-                f"R$ {liquido:.2f}",
-                f"R$ {patrocinios:.2f}",
-                f"R$ {liquido + patrocinios:.2f}",
-                f"R$ {custos_pagos:.2f}",
-                f"R$ {custos_orcados:.2f}",
-                f"R$ {lucro:.2f}",
-                break_even,
-            ],
-        }
-        df_resumo = pd.DataFrame(resumo_data)
+    is_dda = "DDA" in evento
+    label_vendas = (
+        "Vendas Totem (Balcão)" if is_dda else "Ingressos Vendidos (Sympla)"
+    )
+    label_bruto = (
+        "Faturamento Bruto Balcão" if is_dda else "Faturamento Bruto (Sympla)"
+    )
+    label_liq = (
+        "Faturamento Líquido (Sem Taxa)"
+        if is_dda
+        else "Faturamento Líquido (Sympla)"
+    )
+
+    resumo_data = {
+        "Indicador Financeiro": [
+            label_vendas,
+            label_bruto,
+            label_liq,
+            "Aporte de Patrocínios",
+            "Receita Total Realizada",
+            "Custos Operacionais Pagos",
+            "Custos Orçados (Previsão)",
+            "LUCRO LÍQUIDO DO PROJETO",
+            "Ponto de Equilíbrio (Break-Even)",
+        ],
+        "Valor / Métrica": [
+            f"{ing_totais} un",
+            bruto,
+            liquido,
+            patrocinios,
+            liquido + patrocinios,
+            custos_pagos,
+            custos_orcados,
+            lucro,
+            break_even,
+        ],
+    }
+    df_resumo = pd.DataFrame(resumo_data)
+
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        # 1. ABA RESUMO EXECUTIVO
         df_resumo.to_excel(writer, sheet_name="Resumo Executivo", index=False)
 
-        if not df_c.empty:
-            df_c[["data", "item", "valor", "status"]].to_excel(
-                writer, sheet_name="Detalhamento de Custos", index=False
+        # 2. ABA CUSTOS
+        df_c_export = df_c.copy()
+        if not df_c_export.empty and "evento" in df_c_export.columns:
+            df_c_export = df_c_export.drop(columns=["evento", "id"], errors="ignore")
+            df_c_export = df_c_export.rename(
+                columns={"data": "Data", "item": "Insumo / Item", "valor": "Valor (R$)", "status": "Status"}
             )
         else:
-            pd.DataFrame([{"Aviso": "Nenhum custo registrado"}]).to_excel(
-                writer, sheet_name="Detalhamento de Custos", index=False
-            )
+            df_c_export = pd.DataFrame([{"Aviso": "Nenhum custo registrado"}])
+        df_c_export.to_excel(writer, sheet_name="Detalhamento de Custos", index=False)
 
-        if not df_p.empty:
-            df_p[["data", "empresa", "valor"]].to_excel(
-                writer, sheet_name="Patrocínios Captados", index=False
+        # 3. ABA PATROCÍNIOS
+        df_p_export = df_p.copy()
+        if not df_p_export.empty and "evento" in df_p_export.columns:
+            df_p_export = df_p_export.drop(columns=["evento", "id"], errors="ignore")
+            df_p_export = df_p_export.rename(
+                columns={"data": "Data", "empresa": "Parceiro / Empresa", "valor": "Valor (R$)"}
             )
         else:
-            pd.DataFrame([{"Aviso": "Nenhum patrocínio registrado"}]).to_excel(
-                writer, sheet_name="Patrocínios Captados", index=False
-            )
+            df_p_export = pd.DataFrame([{"Aviso": "Nenhum patrocínio registrado"}])
+        df_p_export.to_excel(writer, sheet_name="Patrocínios Captados", index=False)
+
+        workbook = writer.book
+
+        # Estilos padronizados (Iguaizinhos ao Fluxo de Caixa)
+        fmt_cabecalho = workbook.add_format({
+            "bold": True,
+            "text_wrap": True,
+            "valign": "vcenter",
+            "align": "center",
+            "fg_color": "#FF1493",
+            "font_color": "#FFFFFF",
+            "font_name": "Arial",
+            "font_size": 10,
+            "border": 1,
+            "border_color": "#D3D3D3",
+        })
+
+        fmt_celula = workbook.add_format({
+            "font_name": "Arial",
+            "font_size": 9,
+            "align": "left",
+            "valign": "vcenter",
+            "border": 1,
+            "border_color": "#E0E0E0",
+        })
+
+        fmt_moeda = workbook.add_format({
+            "font_name": "Arial",
+            "font_size": 9,
+            "num_format": "R$ #,##0.00",
+            "align": "right",
+            "valign": "vcenter",
+            "border": 1,
+            "border_color": "#E0E0E0",
+        })
+
+        # Estilizar cada aba criada
+        for sheet_name, df_aba in [
+            ("Resumo Executivo", df_resumo),
+            ("Detalhamento de Custos", df_c_export),
+            ("Patrocínios Captados", df_p_export),
+        ]:
+            worksheet = writer.sheets[sheet_name]
+
+            # Escrever Cabeçalho
+            for col_num, value in enumerate(df_aba.columns):
+                worksheet.write(0, col_num, value, fmt_cabecalho)
+
+            # Escrever Dados
+            for row_num in range(len(df_aba)):
+                for col_num, col_name in enumerate(df_aba.columns):
+                    val = df_aba.iloc[row_num, col_num]
+                    if isinstance(val, (int, float)) and ("Valor" in str(col_name) or sheet_name == "Resumo Executivo"):
+                        worksheet.write_number(row_num + 1, col_num, float(val), fmt_moeda)
+                    else:
+                        worksheet.write(row_num + 1, col_num, str(val if val is not None else ""), fmt_celula)
+
+            # Auto-ajuste de largura de colunas
+            for col_num, col_name in enumerate(df_aba.columns):
+                max_len = max(
+                    (df_aba[col_name].astype(str).map(len).max() if not df_aba.empty else 0),
+                    len(col_name),
+                ) + 5
+                worksheet.set_column(col_num, col_num, min(max_len, 45))
+
+            worksheet.freeze_panes(1, 0)
 
     return buffer.getvalue()
 
@@ -195,18 +267,8 @@ def renderizar_gestao_eventos():
     )
 
     lista_meses = [
-        "Janeiro",
-        "Fevereiro",
-        "Março",
-        "Abril",
-        "Maio",
-        "Junho",
-        "Julho",
-        "Agosto",
-        "Setembro",
-        "Outubro",
-        "Novembro",
-        "Dezembro",
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
     ]
 
     # 1. Carregar lista dinâmica de eventos
@@ -223,7 +285,7 @@ def renderizar_gestao_eventos():
         "Selecione o Evento para Planejamento/Gestão:", lista_opcoes
     )
 
-    # ➕ RECURSO 3: Criar Novo Evento Dinamicamente
+    # ➕ Criar Novo Evento Dinamicamente
     with c_ev2:
         st.write("")
         st.write("")
@@ -242,9 +304,7 @@ def renderizar_gestao_eventos():
                         )
                         conn.commit()
                         conn.close()
-                        st.success(
-                            f"Evento {novo_nome_ev} criado com sucesso!"
-                        )
+                        st.success(f"Evento {novo_nome_ev} criado com sucesso!")
                         st.rerun()
                     except sqlite3.IntegrityError:
                         st.error("Este evento já está cadastrado.")
@@ -275,8 +335,7 @@ def renderizar_gestao_eventos():
         if is_dda:
             df_vendas_totem = pd.read_sql_query(
                 "SELECT valor_bruto, valor_liquido FROM fluxo_caixa_geral"
-                " WHERE categoria = 'Serviço Prestado' AND descricao LIKE"
-                " '%Açaí%'",
+                " WHERE categoria = 'Serviço Prestado' AND descricao LIKE '%Açaí%'",
                 conn,
             )
             bruto_calculado = (
@@ -307,9 +366,7 @@ def renderizar_gestao_eventos():
                 if not df_sympla.empty
                 else 10.0
             )
-            liquido_calculado = bruto_calculado * (
-                1 - (taxa_sympla_perc / 100)
-            )
+            liquido_calculado = bruto_calculado * (1 - (taxa_sympla_perc / 100))
             ingressos_totais = (
                 df_sympla["ingressos_vendidos"].iloc[0]
                 if not df_sympla.empty
@@ -323,16 +380,14 @@ def renderizar_gestao_eventos():
 
         conn.close()
 
-        # ⏳ RECURSO 2: Separação entre custos Pagos vs Orçados
+        # Separação de Custos Pagos vs Orçados
         custos_pagos = (
             df_custos[df_custos["status"] == "🟢 Pago"]["valor"].sum()
             if not df_custos.empty
             else 0.0
         )
         custos_orcados = (
-            df_custos[df_custos["status"] == "🟡 Orçado (Previsão)"][
-                "valor"
-            ].sum()
+            df_custos[df_custos["status"] == "🟡 Orçado (Previsão)"]["valor"].sum()
             if not df_custos.empty
             else 0.0
         )
@@ -373,8 +428,7 @@ def renderizar_gestao_eventos():
                 txt_break_even = f"Faltam {faltam} un"
                 cor_be = "#FFEBEE"
                 txt_visual_be = (
-                    f"🎯 Faltam vender {faltam} copos/ingressos para cobrir os"
-                    " custos totais"
+                    f"🎯 Faltam vender {faltam} copos/ingressos para cobrir os custos totais"
                     if is_dda
                     else f"🎯 Faltam vender {faltam} ingressos para lucrar"
                 )
@@ -404,11 +458,9 @@ def renderizar_gestao_eventos():
             if meta_ing > 0:
                 progresso = min(float(ingressos_totais) / meta_ing, 1.0)
                 label_meta = (
-                    f"Vendas Totem: **{ingressos_totais}** de **{meta_ing}**"
-                    " copos"
+                    f"Vendas Totem: **{ingressos_totais}** de **{meta_ing}** copos"
                     if is_dda
-                    else f"Vendas Sympla: **{ingressos_totais}** de"
-                    f" **{meta_ing}** ingressos"
+                    else f"Vendas Sympla: **{ingressos_totais}** de **{meta_ing}** ingressos"
                 )
                 st.markdown(f"{label_meta} ({progresso*100:.1f}%)")
                 st.progress(progresso)
@@ -449,7 +501,6 @@ def renderizar_gestao_eventos():
                 unsafe_allow_html=True,
             )
 
-            # 📊 RECURSO 1: Gráfico Visual de Composição de Gastos (Rosca)
             if not df_custos.empty:
                 st.markdown("#### 📊 Divisão dos Custos por Item")
                 fig_custos = px.pie(
@@ -478,16 +529,10 @@ def renderizar_gestao_eventos():
             )
 
             st.download_button(
-                label=(
-                    "📥 Exportar Dados para Planilha Oficial Executiva (.xlsx)"
-                ),
+                label="📥 Exportar Dados para Planilha Oficial Executiva (.xlsx)",
                 data=dados_excel,
-                file_name=(
-                    f"planejamento_{tag_evento.lower()}_{datetime.now().strftime('%Y')}.xlsx"
-                ),
-                mime=(
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                ),
+                file_name=f"planejamento_{tag_evento.lower()}_{datetime.now().strftime('%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
 
@@ -498,9 +543,7 @@ def renderizar_gestao_eventos():
             if is_dda:
                 st.markdown("### 📊 Metas de Vendas do DDA")
                 st.info(
-                    "💡 O Faturamento e a quantidade de copos vendidos são"
-                    " calculados de forma AUTOMÁTICA e em tempo real via Totem"
-                    " de Vendas Express!"
+                    "💡 O Faturamento e a quantidade de copos vendidos são calculados de forma AUTOMÁTICA e em tempo real via Totem de Vendas Express!"
                 )
                 with st.form("form_dda_meta"):
                     meta_v = st.number_input(
@@ -587,14 +630,7 @@ def renderizar_gestao_eventos():
                 val_c = st.number_input("Custo do Item (R$):", min_value=0.0)
                 dep_c = st.selectbox(
                     "Diretoria Executora:",
-                    [
-                        "PROJETOS",
-                        "IMAGEM",
-                        "AR",
-                        "VP",
-                        "PRESIDÊNCIA",
-                        "NEGÓCIOS",
-                    ],
+                    ["PROJETOS", "IMAGEM", "AR", "VP", "PRESIDÊNCIA", "NEGÓCIOS"],
                     key="dep_c",
                 )
                 status_c = st.selectbox(
@@ -611,8 +647,7 @@ def renderizar_gestao_eventos():
                         conn = sqlite3.connect(DB_PATH)
                         cursor = conn.cursor()
                         cursor.execute(
-                            "INSERT INTO custos_eventos (evento, item, valor,"
-                            " data, status) VALUES (?, ?, ?, ?, ?)",
+                            "INSERT INTO custos_eventos (evento, item, valor, data, status) VALUES (?, ?, ?, ?, ?)",
                             (
                                 evento_selecionado,
                                 desc_c,
@@ -624,7 +659,6 @@ def renderizar_gestao_eventos():
                         conn.commit()
                         conn.close()
 
-                        # Sincroniza apenas se já estiver marcado como PAGO
                         if status_c == "🟢 Pago":
                             salvar_lancamento(
                                 mes_nome,
@@ -655,10 +689,7 @@ def renderizar_gestao_eventos():
                         if "status" in row and row["status"]
                         else "🟢 Pago"
                     )
-                    col_t1.write(
-                        f"📅 {row['data']} | **{row['item']}**"
-                        f" ({status_exibido})"
-                    )
+                    col_t1.write(f"📅 {row['data']} | **{row['item']}** ({status_exibido})")
                     col_t2.write(f"R$ {row['valor']:.2f}")
 
                     if col_t3.button("🗑️ Excluir", key=f"del_c_{row['id']}"):
@@ -670,8 +701,7 @@ def renderizar_gestao_eventos():
                             (row["id"],),
                         )
                         cursor.execute(
-                            "DELETE FROM fluxo_caixa_geral WHERE descricao = ?"
-                            " AND valor_bruto = ?",
+                            "DELETE FROM fluxo_caixa_geral WHERE descricao = ? AND valor_bruto = ?",
                             (desc_para_remover, row["valor"]),
                         )
                         conn.commit()
@@ -690,14 +720,7 @@ def renderizar_gestao_eventos():
                 val_p = st.number_input("Valor Fechado (R$):", min_value=0.0)
                 dep_p = st.selectbox(
                     "Diretoria que Captou:",
-                    [
-                        "NEGÓCIOS",
-                        "IMAGEM",
-                        "AR",
-                        "VP",
-                        "PRESIDÊNCIA",
-                        "PROJETOS",
-                    ],
+                    ["NEGÓCIOS", "IMAGEM", "AR", "VP", "PRESIDÊNCIA", "PROJETOS"],
                     key="dep_p",
                 )
 
@@ -711,8 +734,7 @@ def renderizar_gestao_eventos():
                         conn = sqlite3.connect(DB_PATH)
                         cursor = conn.cursor()
                         cursor.execute(
-                            "INSERT INTO patrocinios_eventos (evento, empresa,"
-                            " valor, data) VALUES (?, ?, ?, ?)",
+                            "INSERT INTO patrocinios_eventos (evento, empresa, valor, data) VALUES (?, ?, ?, ?)",
                             (evento_selecionado, emp_p, val_p, hoje),
                         )
                         conn.commit()
@@ -733,10 +755,7 @@ def renderizar_gestao_eventos():
                             "🟢 Emitida",
                             "❌ Não enviado",
                         )
-                        st.success(
-                            "Patrocínio gravado e sincronizado no Fluxo de"
-                            " Caixa Geral!"
-                        )
+                        st.success("Patrocínio gravado e sincronizado no Fluxo de Caixa Geral!")
                         st.rerun()
 
             st.markdown("#### Histórico de Captações Ativas")
@@ -748,9 +767,7 @@ def renderizar_gestao_eventos():
                     col_p1.write(f"📅 {row['data']} | **{row['empresa']}**")
                     col_p2.write(f"R$ {row['valor']:.2f}")
                     if col_p3.button("🗑️ Excluir", key=f"del_p_{row['id']}"):
-                        desc_para_remover = (
-                            f"Patrocínio {tag_evento}: {row['empresa']}"
-                        )
+                        desc_para_remover = f"Patrocínio {tag_evento}: {row['empresa']}"
                         conn = sqlite3.connect(DB_PATH)
                         cursor = conn.cursor()
                         cursor.execute(
@@ -758,8 +775,7 @@ def renderizar_gestao_eventos():
                             (row["id"],),
                         )
                         cursor.execute(
-                            "DELETE FROM fluxo_caixa_geral WHERE descricao = ?"
-                            " AND valor_bruto = ?",
+                            "DELETE FROM fluxo_caixa_geral WHERE descricao = ? AND valor_bruto = ?",
                             (desc_para_remover, row["valor"]),
                         )
                         conn.commit()
@@ -768,15 +784,12 @@ def renderizar_gestao_eventos():
                         st.rerun()
 
         # =======================================================================
-        # 🧮 RECURSO 4: SIMULADOR DE INGRESSOS E LOTES
+        # 🧮 SIMULADOR DE INGRESSOS E LOTES
         # =======================================================================
         with tab_simulador:
-            st.markdown(
-                "### 🧮 Calculadora de Lotes e Precificação de Ingressos"
-            )
+            st.markdown("### 🧮 Calculadora de Lotes e Precificação de Ingressos")
             st.caption(
-                "Simule cenários antes de abrir o evento no Sympla ou balcão"
-                " para garantir a margem de lucro desejada."
+                "Simule cenários antes de abrir o evento no Sympla ou balcão para garantir a margem de lucro desejada."
             )
 
             c_sim1, c_sim2 = st.columns(2)
@@ -797,14 +810,10 @@ def renderizar_gestao_eventos():
             )
 
             custo_liquido_sim = max(0.0, custo_base_sim - patrocinio_sim)
-            receita_necessaria = custo_liquido_sim * (
-                1 + (margem_alvo_sim / 100)
-            )
+            receita_necessaria = custo_liquido_sim * (1 + (margem_alvo_sim / 100))
 
             taxa_simpla = 0.10 if not is_dda else 0.0
-            preco_sugerido_bruto = (
-                receita_necessaria / meta_pessoas_sim
-            ) / (1 - taxa_simpla)
+            preco_sugerido_bruto = (receita_necessaria / meta_pessoas_sim) / (1 - taxa_simpla)
 
             st.markdown("---")
             st.markdown("#### 💡 Resultado da Simulação Comercial:")
