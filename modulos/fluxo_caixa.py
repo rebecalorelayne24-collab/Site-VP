@@ -202,7 +202,7 @@ def ler_extrato_com_gemini(texto_pdf):
 
 
 def gerar_excel_estilizado(df_export):
-    """Gera um Relatório Financeiro Executivo de Nível ERP no Excel (XlsxWriter)."""
+    """Gera um Relatório Financeiro Executivo no Excel com destaques em Verde (Receitas) e Vermelho (Despesas)."""
     buffer = io.BytesIO()
 
     # Cálculos prévios para o Dashboard
@@ -233,14 +233,14 @@ def gerar_excel_estilizado(df_export):
         workbook = writer.book
 
         # -------------------------------------------------------------
-        # 🎨 PALETA E ESTILOS PROFISSIONAIS (MAGENTA & INSTITUCIONAL)
+        # 🎨 PALETA E ESTILOS PROFISSIONAIS
         # -------------------------------------------------------------
         COR_PRIMARIA = "#FF1493"      # Rosa/Magenta Farmácia Jr.
         COR_FUNDO_CAB = "#C71585"     # Magenta Escuro
-        COR_VERDE_BG = "#E8F5E9"      # Verde Receita
-        COR_VERDE_TXT = "#2E7D32"
-        COR_VERMELHO_BG = "#FFEBEE"   # Vermelho Despesa
-        COR_VERMELHO_TXT = "#C62828"
+        COR_VERDE_BG = "#E8F5E9"      # Verde Receita Suave
+        COR_VERDE_TXT = "#2E7D32"     # Verde Texto
+        COR_VERMELHO_BG = "#FFEBEE"   # Vermelho Despesa Suave
+        COR_VERMELHO_TXT = "#C62828"  # Vermelho Texto
 
         fmt_capa_titulo = workbook.add_format({
             "bold": True, "font_name": "Arial", "font_size": 18,
@@ -311,15 +311,29 @@ def gerar_excel_estilizado(df_export):
             "border": 1, "border_color": "#E0E0E0", "bg_color": "#F9FAFB",
         })
 
-        fmt_moeda = workbook.add_format({
-            "font_name": "Arial", "font_size": 9, "num_format": "R$ #,##0.00",
-            "align": "right", "valign": "vcenter", "border": 1, "border_color": "#E0E0E0",
+        # Estilos específicos para destacar Receita e Despesa
+        fmt_tipo_receita = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 9,
+            "font_color": COR_VERDE_TXT, "fg_color": COR_VERDE_BG,
+            "align": "center", "valign": "vcenter", "border": 1, "border_color": "#C8E6C9",
         })
 
-        fmt_moeda_zebra = workbook.add_format({
-            "font_name": "Arial", "font_size": 9, "num_format": "R$ #,##0.00",
-            "align": "right", "valign": "vcenter", "border": 1, "border_color": "#E0E0E0",
-            "bg_color": "#F9FAFB",
+        fmt_tipo_despesa = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 9,
+            "font_color": COR_VERMELHO_TXT, "fg_color": COR_VERMELHO_BG,
+            "align": "center", "valign": "vcenter", "border": 1, "border_color": "#FFCDD2",
+        })
+
+        fmt_moeda_receita = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 9, "num_format": "R$ #,##0.00",
+            "font_color": COR_VERDE_TXT, "align": "right", "valign": "vcenter",
+            "border": 1, "border_color": "#E0E0E0",
+        })
+
+        fmt_moeda_despesa = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 9, "num_format": "R$ #,##0.00",
+            "font_color": COR_VERMELHO_TXT, "align": "right", "valign": "vcenter",
+            "border": 1, "border_color": "#E0E0E0",
         })
 
         fmt_analise = workbook.add_format({
@@ -340,14 +354,12 @@ def gerar_excel_estilizado(df_export):
         ws_dash.set_landscape()
         ws_dash.set_paper(9)
 
-        # Inserção do Logo se a imagem existir
         if os.path.exists("assets/logo.png"):
             ws_dash.insert_image("B2", "assets/logo.png", {"x_scale": 0.20, "y_scale": 0.20})
 
         ws_dash.merge_range("C2:H3", "RELATÓRIO FINANCEIRO GERENCIAL — FARMÁCIA JR.", fmt_capa_titulo)
         ws_dash.merge_range("C4:H4", f"UFMG · Vice-Presidência Financeira  |  Gerado em {agora.strftime('%d/%m/%Y às %H:%M')}", fmt_capa_sub)
 
-        # Cartões KPI
         ws_dash.write("B6", "📌 INDICADORES CHAVE DA OPERAÇÃO", fmt_secao_titulo)
 
         ws_dash.merge_range("B7:C7", "FATURAMENTO (RECEITAS)", fmt_kpi_titulo)
@@ -365,21 +377,19 @@ def gerar_excel_estilizado(df_export):
         ws_dash.write("I7", "TOTAL REGISTROS", fmt_kpi_titulo)
         ws_dash.write("I8", f"{qtd_lancamentos} un", fmt_kpi_num)
 
-        # Tabela Suporte do Gráfico
         ws_dash.write("B11", "📊 RESUMO DE CAIXA MENSAL", fmt_secao_titulo)
         ws_dash.write("B13", "Métrica", fmt_cabecalho)
         ws_dash.write("C13", "Valor (R$)", fmt_cabecalho)
 
         ws_dash.write("B14", "Entradas (Receitas)", fmt_celula)
-        ws_dash.write("C14", tot_receitas, fmt_moeda)
+        ws_dash.write("C14", tot_receitas, fmt_moeda_receita)
 
         ws_dash.write("B15", "Saídas (Despesas)", fmt_celula)
-        ws_dash.write("C15", tot_despesas, fmt_moeda)
+        ws_dash.write("C15", tot_despesas, fmt_moeda_despesa)
 
         ws_dash.write("B16", "Resultado Líquido", fmt_celula)
-        ws_dash.write("C16", saldo_liquido, fmt_moeda)
+        ws_dash.write("C16", saldo_liquido, fmt_moeda_receita if saldo_liquido >= 0 else fmt_moeda_despesa)
 
-        # Gráfico Nátivo Excel
         chart_resumo = workbook.add_chart({"type": "column"})
         chart_resumo.add_series({
             "name": "Consolidado R$",
@@ -393,11 +403,9 @@ def gerar_excel_estilizado(df_export):
         chart_resumo.set_size({"width": 460, "height": 220})
         ws_dash.insert_chart("D11", chart_resumo)
 
-        # Comentário / Análise Automática
         ws_dash.write("B20", "💬 ANÁLISE TÉCNICA E PARECER FINANCEIRO", fmt_secao_titulo)
         ws_dash.merge_range("B21:I22", analise_texto, fmt_analise)
 
-        # Rodapé
         ws_dash.merge_range("B25:I25", "Farmácia Jr. UFMG — Documento Financeiro Oficial e Confidencial", fmt_rodape)
 
         ws_dash.set_column("A:A", 3)
@@ -426,16 +434,19 @@ def gerar_excel_estilizado(df_export):
         for row_num in range(len(df_depto)):
             zebra = row_num % 2 == 1
             f_txt = fmt_celula_zebra if zebra else fmt_celula
-            f_moeda = fmt_moeda_zebra if zebra else fmt_moeda
 
             for col_num, col_name in enumerate(df_depto.columns):
                 v = df_depto.iloc[row_num, col_num]
                 if col_name == "Diretoria":
                     ws_depto.write(row_num + 1, col_num, str(v), f_txt)
+                elif col_name == "Receita":
+                    ws_depto.write_number(row_num + 1, col_num, float(v), fmt_moeda_receita)
+                elif col_name == "Despesa":
+                    ws_depto.write_number(row_num + 1, col_num, float(v), fmt_moeda_despesa)
                 else:
-                    ws_depto.write_number(row_num + 1, col_num, float(v), f_moeda)
+                    fmt_s = fmt_moeda_receita if float(v) >= 0 else fmt_moeda_despesa
+                    ws_depto.write_number(row_num + 1, col_num, float(v), fmt_s)
 
-        # Gráfico por Diretoria
         if not df_depto.empty:
             chart_depto = workbook.add_chart({"type": "bar", "subtype": "group"})
             chart_depto.add_series({
@@ -460,7 +471,7 @@ def gerar_excel_estilizado(df_export):
         ws_depto.freeze_panes(1, 1)
 
         # =============================================================
-        # 3. ABA BASE DE DADOS COMPLETA (COM ZEBRA E FILTRO AUTOMÁTICO)
+        # 3. ABA BASE DE DADOS COMPLETA (TIPO & VALORES EM CORES)
         # =============================================================
         colunas_renomeadas = {
             "id": "ID", "mes": "Mês", "data": "Data", "departamento": "Diretoria", "tipo": "Tipo",
@@ -481,14 +492,22 @@ def gerar_excel_estilizado(df_export):
 
         for row_num in range(len(df_formatado)):
             zebra = row_num % 2 == 1
-            f_txt = fmt_celula_zebra if zebra else fmt_celula
-            f_moeda = fmt_moeda_zebra if zebra else fmt_moeda
+            tipo_linha = str(df_formatado.iloc[row_num].get("Tipo", "")).strip().lower()
+            eh_receita = "receita" in tipo_linha
 
             for col_num, col_name in enumerate(df_formatado.columns):
                 val = df_formatado.iloc[row_num, col_num]
-                if "Valor" in col_name or "Taxa" in col_name:
-                    ws_base.write_number(row_num + 1, col_num, float(val or 0.0), f_moeda)
+
+                if col_name == "Tipo":
+                    # Coluna Tipo destacada em Verde ou Vermelho
+                    fmt_t = fmt_tipo_receita if eh_receita else fmt_tipo_despesa
+                    ws_base.write(row_num + 1, col_num, str(val or ""), fmt_t)
+                elif "Valor" in col_name or "Taxa" in col_name:
+                    # Valores em Verde (Receita) ou Vermelho (Despesa)
+                    fmt_m = fmt_moeda_receita if eh_receita else fmt_moeda_despesa
+                    ws_base.write_number(row_num + 1, col_num, float(val or 0.0), fmt_m)
                 else:
+                    f_txt = fmt_celula_zebra if zebra else fmt_celula
                     ws_base.write(row_num + 1, col_num, str(val or ""), f_txt)
 
         for col_num, col_name in enumerate(df_formatado.columns):
@@ -498,7 +517,6 @@ def gerar_excel_estilizado(df_export):
             ) + 4
             ws_base.set_column(col_num, col_num, min(max_len, 45))
 
-        # Filtro Automático e Freeze Panes
         if not df_formatado.empty:
             ws_base.autofilter(0, 0, len(df_formatado), len(df_formatado.columns) - 1)
         ws_base.freeze_panes(1, 1)
@@ -561,7 +579,7 @@ def renderizar_aba_fluxo_caixa():
                         mes_nome, data.strftime("%Y-%m-%d"), depto, tipo, cat,
                         desc, v_bruto, v_taxa, v_liq, conta_final_manual.strip(), pagamento, nf, onvio
                     )
-                    st.success(f"Lançamento manual salvo!")
+                    st.success("Lançamento manual salvo!")
                     st.rerun()
 
     with aba_pdf:
