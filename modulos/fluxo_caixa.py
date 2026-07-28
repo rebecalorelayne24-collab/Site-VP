@@ -1,10 +1,9 @@
 import io
-import json
 import os
+import re
 import sqlite3
 from datetime import datetime
 
-import google.generativeai as genai
 import pandas as pd
 from pypdf import PdfReader
 import streamlit as st
@@ -88,73 +87,87 @@ def salvar_lancamento(
     conn.close()
 
 
-def ler_extrato_com_gemini(texto_pdf):
-    """Realiza a leitura do extrato usando estritamente o modelo gemini-2.5-flash."""
-    api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-    if api_key:
-        api_key = str(api_key).strip().strip('"').strip("'")
-
-    if not api_key:
-        st.error("⚠️ Chave GEMINI_API_KEY não encontrada nos Secrets do Streamlit Cloud.")
-        return []
-
+def ler_extrato_com_regex(texto_pdf):
+    """Lê o texto do extrato bancário linha por linha utilizando Regras Fixas / Regex (sem IA)."""
     if not texto_pdf or len(texto_pdf.strip()) < 10:
         st.warning("⚠️ O PDF parece estar sem texto editável.")
         return []
 
-    try:
-        genai.configure(api_key=api_key)
+    lancamentos = []
+    linhas = texto_pdf.split("\n")
 
-        prompt = f"""
-        Você é um assistente financeiro da Farmácia Jr. (UFMG).
-        Analise o texto deste extrato bancário e extraia TODOS os lançamentos válidos de entrada e saída.
-        Ignore linhas de saldos ou rendimentos informativos.
+    # Expressão regular para capturar linhas com data (DD/MM ou DD/MM/AAAA) e valores financeiros
+    padrao_transacao = re.compile(
+        r"(\d{2}/\d{2}(?:/\d{2,4})?)\s+(.+?)\s+(-?\s*R?\$\s*[\d\.,]+|\d+[\.,]\d{2})(?:\s+([C|D]))?",
+        re.IGNORECASE,
+    )
 
-        Retorne obrigatoriamente uma lista JSON no formato puro:
-        [
-            {{"data": "2026-03-15", "tipo": "Receita", "descricao": "PIX RECEBIDO - JOAO SILVA", "valor_bruto": 150.00}},
-            {{"data": "2026-03-16", "tipo": "Despesa", "descricao": "COMPRA DE JALECOS", "valor_bruto": 450.50}}
-        ]
+    ano_atual = datetime.now().year
 
-        Regras:
-        - data: YYYY-MM-DD
-        - tipo: "Receita" ou "Despesa"
-        - valor_bruto: número float positivo
+    for linha in linhas:
+        linha_limpa = linha.strip()
+        # Ignora linhas comuns de cabeçalhos e saldos
+        if any(
+            palavra in linha_limpa.lower()
+            for palavra in ["saldo", "extrato", "período", "página", "rendimento"]
+        ):
+            continue
 
-        Texto do extrato:
-        {texto_pdf}
-        """
+        match = padrao_transacao.search(linha_limpa)
+        if match:
+            data_str, descricao, valor_str, indicador = match.groups()
 
-        # Modelo fixado diretamente no gemini-2.5-flash
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        res = model.generate_content(prompt)
+            # Formatação da data para YYYY-MM-DD
+            try:
+                partes_data = data_str.split("/")
+                dia = partes_data[0]
+                mes = partes_data[1]
+                ano = partes_data[2] if len(partes_data) == 3 else str(ano_atual)
+                if len(ano) == 2:
+                    ano = f"20{ano}"
+                data_iso = f"{ano}-{mes.zfill(2)}-{dia.zfill(2)}"
+            except Exception:
+                data_iso = datetime.now().strftime("%Y-%m-%d")
 
-        if not res or not res.text:
-            st.error("⚠️ Não foi possível obter resposta da IA.")
-            return []
+            # Tratamento numérico do valor
+            valor_limpo = (
+                valor_str.replace("R$", "")
+                .replace(" ", "")
+                .replace(".", "")
+                .replace(",", ".")
+            )
+            try:
+                valor_float = float(valor_limpo)
+            except ValueError:
+                continue
 
-        resposta_texto = res.text.strip()
+            # Classificação do Tipo (Receita ou Despesa)
+            # Se tiver sinal negativo ou o indicador 'D' (Débito)
+            if valor_float < 0 or (indicador and indicador.upper() == "D"):
+                tipo = "Despesa"
+                valor_float = abs(valor_float)
+            elif indicador and indicador.upper() == "C":
+                tipo = "Receita"
+            else:
+                # Palavras-chave genéricas de entrada
+                if any(
+                    k in descricao.upper()
+                    for k in ["PIX RECEBIDO", "CRÉDITO", "DEPÓSITO", "TRANSFERÊNCIA RECEBIDA"]
+                ):
+                    tipo = "Receita"
+                else:
+                    tipo = "Despesa"
 
-        # Limpeza caso o modelo retorne marcadores de bloco markdown ```json
-        if "```" in resposta_texto:
-            partes = resposta_texto.split("```")
-            for parte in partes:
-                parte_limpa = parte.strip()
-                if parte_limpa.startswith("json"):
-                    parte_limpa = parte_limpa[4:].strip()
-                if parte_limpa.startswith("[") and parte_limpa.endswith("]"):
-                    resposta_texto = parte_limpa
-                    break
+            # Adiciona apenas se o valor for válido
+            if valor_float > 0:
+                lancamentos.append({
+                    "data": data_iso,
+                    "tipo": tipo,
+                    "descricao": descricao.strip(),
+                    "valor_bruto": valor_float,
+                })
 
-        dados = json.loads(resposta_texto.strip())
-        return dados if isinstance(dados, list) else []
-
-    except json.JSONDecodeError as e:
-        st.error(f"A IA não formatou o JSON corretamente: {e}")
-        return []
-    except Exception as e:
-        st.error(f"Erro no processamento da IA: {e}")
-        return []
+    return lancamentos
 
 
 def gerar_excel_estilizado(df_export):
@@ -262,7 +275,7 @@ def renderizar_aba_fluxo_caixa():
         "<h2 style='text-align: center; color: #C71585;'>📊 Fluxo de Caixa Geral — Farmácia Jr.</h2>",
         unsafe_allow_html=True,
     )
-    st.write("Gerencie os registros financeiros de forma manual ou por IA.")
+    st.write("Gerencie os registros financeiros de forma manual ou por leitura de extrato.")
 
     lista_meses = [
         "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -273,7 +286,7 @@ def renderizar_aba_fluxo_caixa():
     df = pd.read_sql_query("SELECT * FROM fluxo_caixa_geral ORDER BY data DESC, id DESC", conn)
     conn.close()
 
-    aba_manual, aba_pdf = st.tabs(["➕ Registro Manual", "🤖 Importar por IA (PDF)"])
+    aba_manual, aba_pdf = st.tabs(["➕ Registro Manual", "📄 Importar Extrato (PDF)"])
 
     with aba_manual:
         with st.expander("Abrir Formulário de Operação Manual"):
@@ -303,12 +316,12 @@ def renderizar_aba_fluxo_caixa():
                     st.rerun()
 
     with aba_pdf:
-        st.markdown("#### 🤖 Leitura Cognitiva de Extratos com Gemini")
-        st.caption("Faça o upload do PDF para mapeamento automático das transações.")
+        st.markdown("#### 📄 Leitura Direta de Extratos PDF (Sem dependência de API/IA)")
+        st.caption("Faça o upload do PDF. O sistema varre o texto automaticamente linha por linha.")
 
-        arquivo_pdf = st.file_uploader("Escolha o arquivo do Extrato (.pdf)", type=["pdf"], key="uploader_ia_fluxo")
+        arquivo_pdf = st.file_uploader("Escolha o arquivo do Extrato (.pdf)", type=["pdf"], key="uploader_regex_fluxo")
         if arquivo_pdf is not None:
-            with st.spinner("🤖 Extraindo texto do documento..."):
+            with st.spinner("🔍 Lendo linhas do arquivo..."):
                 try:
                     reader = PdfReader(arquivo_pdf)
                     texto_bruto = ""
@@ -321,14 +334,13 @@ def renderizar_aba_fluxo_caixa():
                     texto_bruto = ""
 
             if texto_bruto:
-                with st.spinner("🧠 O Gemini está interpretando as transações..."):
-                    lancamentos_ia = ler_extrato_com_gemini(texto_bruto)
+                lancamentos = ler_extrato_com_regex(texto_bruto)
 
-                if lancamentos_ia:
-                    st.write(f"📋 **{len(lancamentos_ia)} lançamentos mapeados pela IA:**")
+                if lancamentos:
+                    st.write(f"📋 **{len(lancamentos)} lançamentos encontrados no extrato:**")
 
                     dados_finais = []
-                    for item in lancamentos_ia:
+                    for item in lancamentos:
                         try:
                             dt_obj = datetime.strptime(item["data"], "%Y-%m-%d")
                             mes_calculado = lista_meses[dt_obj.month - 1]
@@ -354,7 +366,7 @@ def renderizar_aba_fluxo_caixa():
                     df_previa = pd.DataFrame(dados_finais)
                     st.dataframe(df_previa[["data", "tipo", "descricao", "valor_bruto"]], use_container_width=True)
 
-                    if st.button("📥 Aprovar e Injetar Transações da IA", type="primary"):
+                    if st.button("📥 Aprovar e Salvar Transações", type="primary"):
                         for lancamento in dados_finais:
                             salvar_lancamento(
                                 lancamento["mes"], lancamento["data"], lancamento["departamento"],
@@ -363,10 +375,10 @@ def renderizar_aba_fluxo_caixa():
                                 lancamento["conta_origem"], lancamento["status_pagamento"],
                                 lancamento["nota_fiscal"], lancamento["status_onvio"]
                             )
-                        st.success("Extrato salvo no banco de dados!")
+                        st.success("Extrato salvo com sucesso no banco de dados!")
                         st.rerun()
                 else:
-                    st.warning("A IA não encontrou lançamentos válidos no texto do extrato.")
+                    st.warning("Nenhum padrão de lançamento foi identificado no texto deste extrato.")
             else:
                 st.error("Não foi possível extrair texto do PDF.")
 
