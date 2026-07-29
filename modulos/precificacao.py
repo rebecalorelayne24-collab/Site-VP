@@ -41,9 +41,8 @@ def calcular_data_final_uteis(data_inicial, dias_uteis):
 
 
 def extrair_valor_pdf_com_ia(arquivo_pdf):
-    """Lê o PDF do orçamento do laboratório e usa Gemini para extrair o valor bruto de forma estável."""
+    """Lê o PDF do orçamento do laboratório usando o modelo multimodal do Gemini."""
     try:
-        # Busca a API Key do Streamlit Secrets ou do ambiente do sistema
         api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
             "GEMINI_API_KEY"
         )
@@ -51,25 +50,20 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
             api_key = str(api_key).strip().strip('"').strip("'")
 
         if not api_key:
-            st.error(
-                "API Key do Gemini não configurada. Adicione 'GEMINI_API_KEY'"
-                " nos secrets."
-            )
+            st.warning("⚠️ API Key do Gemini não configurada nos Secrets.")
             return None
 
-        # Configuração da biblioteca google.generativeai
         genai.configure(api_key=api_key)
 
+        # 1. Reseta e lê os bytes do PDF
         arquivo_pdf.seek(0)
         bytes_pdf = arquivo_pdf.read()
 
-        arquivo_pdf.seek(0)
-        reader = PdfReader(arquivo_pdf)
-        texto_completo = ""
-        for page in reader.pages:
-            texto_extraido = page.extract_text()
-            if texto_extraido:
-                texto_completo += texto_extraido + "\n"
+        # Estrutura multimodal para envio de PDF em bytes ao Gemini
+        documento_pdf = {
+            "mime_type": "application/pdf",
+            "data": bytes_pdf
+        }
 
         prompt = """
         Você é um auditor financeiro experiente da Farmácia Jr. (UFMG).
@@ -84,22 +78,18 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
         """
 
         modelos_testar = [
-            "gemini-2.0-flash",
             "gemini-1.5-flash",
-            "gemini-flash-latest",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
         ]
-        resposta_texto = None
 
-        conteudo_input = [
-            prompt,
-            {"mime_type": "application/pdf", "data": bytes_pdf},
-        ]
+        resposta_texto = None
 
         for m in modelos_testar:
             try:
                 model = genai.GenerativeModel(m)
                 res = model.generate_content(
-                    conteudo_input,
+                    [prompt, documento_pdf],
                     generation_config=genai.types.GenerationConfig(
                         temperature=0.0
                     ),
@@ -110,27 +100,35 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
             except Exception:
                 continue
 
-        if not resposta_texto and len(texto_completo.strip()) > 5:
-            prompt_txt = f"{prompt}\n\nTexto do Orçamento:\n{texto_completo}"
-            for m in modelos_testar:
-                try:
-                    model = genai.GenerativeModel(m)
-                    res = model.generate_content(
-                        prompt_txt,
-                        generation_config=genai.types.GenerationConfig(
-                            temperature=0.0
-                        ),
-                    )
-                    if res and res.text:
-                        resposta_texto = res.text.strip()
-                        break
-                except Exception:
-                    continue
+        # Fallback via texto extraído por PyPDF caso a leitura direta em bytes encontre bloqueio
+        if not resposta_texto:
+            arquivo_pdf.seek(0)
+            reader = PdfReader(arquivo_pdf)
+            texto_pdf = "\n".join(
+                [page.extract_text() or "" for page in reader.pages]
+            )
+
+            if len(texto_pdf.strip()) > 5:
+                prompt_txt = f"{prompt}\n\nTexto do Orçamento:\n{texto_pdf}"
+                for m in modelos_testar:
+                    try:
+                        model = genai.GenerativeModel(m)
+                        res = model.generate_content(
+                            prompt_txt,
+                            generation_config=genai.types.GenerationConfig(
+                                temperature=0.0
+                            ),
+                        )
+                        if res and res.text:
+                            resposta_texto = res.text.strip()
+                            break
+                    except Exception:
+                        continue
 
         if not resposta_texto:
             return None
 
-        # Limpeza de formatação Markdown JSON
+        # Limpeza do JSON retornado pela IA
         if "```" in resposta_texto:
             partes = resposta_texto.split("```")
             for parte in partes:
@@ -144,6 +142,7 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
         dados_ia = json.loads(resposta_texto.strip())
         val_extraido = dados_ia.get("valor_total", 0.0)
 
+        # Tratamento de string para float (ex: "1.250,50" -> 1250.50)
         if isinstance(val_extraido, str):
             val_limpo = re.sub(r"[^\d,\.]", "", val_extraido)
             if "," in val_limpo and "." in val_limpo:
@@ -155,7 +154,7 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
         return float(val_extraido)
 
     except Exception as e:
-        st.error(f"Erro ao processar o PDF com a IA: {e}")
+        st.error(f"Erro na análise inteligente do PDF: {e}")
         return None
 
 
@@ -569,7 +568,7 @@ def renderizar_aba_precificacao():
             ),
         )
         metodologia = st.text_area(
-            "Metodologia applied:",
+            "Metodologia aplicada:",
             value=(
                 "Contagem de bactérias heterotróficas conforme padrões"
                 " laboratoriais."
@@ -640,6 +639,7 @@ def renderizar_aba_precificacao():
             mime=(
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ),
+            use_container_width=True,
         )
     else:
         st.warning(
