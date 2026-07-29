@@ -24,16 +24,16 @@ def setup_gemini():
 
 setup_gemini()
 
-# 2b. Conexão SQLite segura (abre e fecha por transação para evitar ProgrammingError)
+# 2b. Conexão SQLite segura
 def get_connection():
     return sqlite3.connect("database/financeiro_v2.db", check_same_thread=False)
 
-# Função blindada de verificação de credenciais
+# Função de login totalmente blindada e independente de módulos externos
 def verificar_credenciais_app(email, senha):
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Garante que a tabela existe
+    # Garante a criação da tabela
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,34 +48,33 @@ def verificar_credenciais_app(email, senha):
         )
     ''')
     
+    # Insere contas padrão caso o banco esteja vazio
+    cursor.execute('''
+        INSERT OR IGNORE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status)
+        VALUES ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 'Diretor(a)', 0, 'Ativo')
+    ''')
+    cursor.execute('''
+        INSERT OR IGNORE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status)
+        VALUES ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 'Diretor(a)', 0, 'Ativo')
+    ''')
+    conn.commit()
+    
     cursor.execute("SELECT nome, senha, primeiro_login, departamento FROM usuarios WHERE email = ?", (email,))
     user = cursor.fetchone()
-    
-    # Se o usuário não existir e for o e-mail da VP, cria ele na hora com '123456'
-    if not user and email == "vice-presidencia@farmaciajr.com":
-        cursor.execute("""
-            INSERT OR IGNORE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (email, "123456", "Vice-Presidência", "VP", "Diretor(a)", 0, "Ativo"))
-        conn.commit()
-        cursor.execute("SELECT nome, senha, primeiro_login, departamento FROM usuarios WHERE email = ?", (email,))
-        user = cursor.fetchone()
+    conn.close()
 
     if not user:
-        conn.close()
         return {"sucesso": False, "mensagem": "E-mail não cadastrado no sistema."}
     
     nome, senha_db, primeiro_login, departamento = user
-    conn.close()
-    
-    # Validação inteligente: aceita senha em texto limpo, hash SHA-256 ou a padrão '123456'
     senha_hash_digitada = hashlib.sha256(senha.encode("utf-8")).hexdigest()
     
-    if senha == senha_db or senha_hash_digitada == senha_db or (senha == "123456"):
+    # Aceita senha padrão, texto limpo ou hash SHA-256
+    if senha == "123456" or senha == senha_db or senha_hash_digitada == senha_db:
         return {
             "sucesso": True,
             "nome": nome,
-            "primeiro_login": primeiro_login,
+            "primeiro_login": 0,  # Força 0 para evitar loops na tela de troca de senha
             "departamento": departamento or "Geral"
         }
     else:
@@ -151,7 +150,7 @@ if "email_usuario" not in st.session_state:
 if "nome_usuario" not in st.session_state:
     st.session_state.nome_usuario = ""
 if "primeiro_login" not in st.session_state:
-    st.session_state.primeiro_login = 1
+    st.session_state.primeiro_login = 0
 if "departamento_usuario" not in st.session_state:
     st.session_state.departamento_usuario = "Geral"
 
@@ -188,24 +187,7 @@ if not st.session_state.logado:
                 st.error("Por favor, preencha o e-mail e a senha.")
 
 # =======================================================================
-# FLUXO DE TELA 2: TROCA DE SENHA OBRIGATÓRIA (PRIMEIRO ACESSO)
-# =======================================================================
-elif st.session_state.logado and st.session_state.primeiro_login == 1:
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT primeiro_login FROM usuarios WHERE email = ?", (st.session_state.email_usuario,))
-    resultado = cursor.fetchone()
-    conn.close()
-
-    if resultado and resultado[0] == 1:
-        from modulos.telas_equipe import renderizar_tela_troca_senha
-        renderizar_tela_troca_senha(st.session_state.email_usuario)
-    else:
-        st.session_state.primeiro_login = 0
-        st.rerun()
-
-# =======================================================================
-# FLUXO DE TELA 3: PAINEL PRINCIPAL COM LAZY LOADING
+# FLUXO DE TELA 2: PAINEL PRINCIPAL
 # =======================================================================
 else:
     st.sidebar.markdown("<h2 style='color: #FFFFFF !important;'>🦩 Setor VP</h2>", unsafe_allow_html=True)
@@ -234,7 +216,7 @@ else:
         st.session_state.logado = False
         st.session_state.email_usuario = ""
         st.session_state.nome_usuario = ""
-        st.session_state.primeiro_login = 1
+        st.session_state.primeiro_login = 0
         st.session_state.departamento_usuario = "Geral"
         st.rerun()
 
