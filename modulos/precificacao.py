@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -45,7 +44,7 @@ def calcular_data_final_uteis(data_inicial, dias_uteis):
 
 @st.cache_data(show_spinner=False)
 def _processar_pdf_ia_cached(bytes_pdf_content, api_key):
-    """Processa o PDF usando o Gemini em cache para economizar chamadas de API."""
+    """Processa o PDF usando o Gemini em cache para economizar chamadas e evitar erros."""
     genai.configure(api_key=api_key)
 
     reader = PdfReader(io.BytesIO(bytes_pdf_content))
@@ -65,7 +64,8 @@ def _processar_pdf_ia_cached(bytes_pdf_content, api_key):
     {"valor_total": 0.00}
     """
 
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    # Atualizado para o modelo atual e estável gemini-3.6-flash
+    model = genai.GenerativeModel("gemini-3.6-flash")
     response = model.generate_content(
         f"{prompt}\n\nTexto do PDF:\n{texto_completo}",
         generation_config=genai.types.GenerationConfig(temperature=0.0),
@@ -79,7 +79,7 @@ def _processar_pdf_ia_cached(bytes_pdf_content, api_key):
 
 
 def extrair_valor_pdf_com_ia(arquivo_pdf):
-    """Lê o PDF do orçamento do laboratório e extrai o valor utilizando o cache para economizar chamadas."""
+    """Lê o PDF do orçamento do laboratório e extrai o valor utilizando o cache."""
     try:
         api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
             "GEMINI_API_KEY"
@@ -185,14 +185,13 @@ def formatar_tabela_word(tabela, bg_cabecalho="003366"):
         for cell in row.cells:
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i == 0:
-                # Fundo Azul para o cabeçalho
                 shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{bg_cabecalho}"/>')
                 cell._tc.get_or_add_tcPr().append(shading)
                 for p in cell.paragraphs:
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     for r in p.runs:
                         r.font.bold = True
-                        r.font.color.rgb = RGBColor(255, 255, 255)  # Texto Branco
+                        r.font.color.rgb = RGBColor(255, 255, 255)
                         r.font.size = Pt(10)
             else:
                 definir_borda_celula(cell)
@@ -205,7 +204,6 @@ def gerar_docx_proposta(dados):
     """Gera o documento Word (.docx) com título PRETO e detalhes em AZUL."""
     doc = docx.Document()
 
-    # Margens padrão (2.54 cm / 1 polegada)
     for section in doc.sections:
         section.top_margin = Inches(1)
         section.bottom_margin = Inches(1)
@@ -220,36 +218,30 @@ def gerar_docx_proposta(dados):
     agora = obter_agora_br()
     data_validade = calcular_data_final_uteis(agora, 15).strftime("%d/%m/%Y")
 
-    # 1. Validade (Topo Alinhado à Direita, tom cinza discreto)
     p_val = doc.add_paragraph()
     p_val.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     run_val = p_val.add_run(f"Validade precificação:\n{data_validade}")
     run_val.font.size = Pt(9.5)
     run_val.font.color.rgb = RGBColor(100, 100, 100)
 
-    # 2. Título do Cliente (Centralizado, Negrito e em PRETO)
     p_tit = doc.add_paragraph()
     p_tit.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_tit = p_tit.add_run(f"\nPrecificação – {dados['nome_lead']}")
     run_tit.bold = True
     run_tit.font.size = Pt(15)
-    run_tit.font.color.rgb = RGBColor(0, 0, 0)  # TÍTULO EM PRETO
+    run_tit.font.color.rgb = RGBColor(0, 0, 0)
 
-    # 3. Subtítulo (Nome do Serviço em Azul)
     p_sub = doc.add_paragraph()
     run_sub = p_sub.add_run(f"{dados['nome_servico']}")
     run_sub.bold = True
     run_sub.font.size = Pt(12)
-    run_sub.font.color.rgb = RGBColor(0, 51, 102)  # SUBTÍTULO EM AZUL
+    run_sub.font.color.rgb = RGBColor(0, 51, 102)
 
     if dados["tipo_servico"] == "Serviço Autoral (Farmácia Jr.)":
-        # ---------------------------------------------------------------------
-        # 1ª OPÇÃO - PRECIFICAÇÃO CHEIA
-        # ---------------------------------------------------------------------
         p_op1 = doc.add_paragraph()
         run_op1 = p_op1.add_run("1° opção – Precificação cheia")
         run_op1.bold = True
-        run_op1.font.color.rgb = RGBColor(0, 51, 102)  # Título de opção em Azul
+        run_op1.font.color.rgb = RGBColor(0, 51, 102)
 
         tbl1 = doc.add_table(rows=2, cols=4)
         tbl1.autofit = False
@@ -268,22 +260,17 @@ def gerar_docx_proposta(dados):
         row1[2].text = str(dados["quantidade"])
         row1[3].text = f"R$ {dados['total_cheio']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        formatar_tabela_word(tbl1, bg_cabecalho="003366")  # Cabeçalho da Tabela em Azul
+        formatar_tabela_word(tbl1, bg_cabecalho="003366")
 
         doc.add_paragraph(f"\nPrazo de execução: {dados['prazo']} dias úteis")
         doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_cheio']}")
+        doc.add_paragraph()
 
-        doc.add_paragraph()  # Espaçador
-
-        # ---------------------------------------------------------------------
-        # 2ª OPÇÃO - DESCONTO DE ACORDO
-        # ---------------------------------------------------------------------
         p_op2 = doc.add_paragraph()
         run_op2 = p_op2.add_run("2° opção – desconto de acordo")
         run_op2.bold = True
-        run_op2.font.color.rgb = RGBColor(0, 51, 102)  # Título de opção em Azul
+        run_op2.font.color.rgb = RGBColor(0, 51, 102)
 
-        # Marcadores de desconto em tópicos
         if dados.get("motivos_lista") and isinstance(dados["motivos_lista"], list):
             for motivo in dados["motivos_lista"]:
                 p_item = doc.add_paragraph(style="List Bullet")
@@ -311,15 +298,12 @@ def gerar_docx_proposta(dados):
         row2[2].text = str(dados["quantidade"])
         row2[3].text = f"R$ {dados['total_desconto']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        formatar_tabela_word(tbl2, bg_cabecalho="003366")  # Cabeçalho da Tabela em Azul
+        formatar_tabela_word(tbl2, bg_cabecalho="003366")
 
         doc.add_paragraph(f"\nPrazo de execução: {dados['prazo']} dias úteis")
         doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_desconto']}")
 
     else:
-        # ---------------------------------------------------------------------
-        # TERCEIRIZADO (LABORATÓRIO)
-        # ---------------------------------------------------------------------
         p_op1 = doc.add_paragraph()
         run_op1 = p_op1.add_run("1° opção – Precificação cheia")
         run_op1.bold = True
@@ -348,7 +332,6 @@ def gerar_docx_proposta(dados):
             f"\nPrazo de execução: {dados['prazo_terceirizado']} dias (Incluso prazo de segurança da EJ. Previsão: {dados['data_entrega_terc']})"
         )
         doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_terceirizado']}")
-
         doc.add_paragraph()
 
         p_param = doc.add_paragraph()
@@ -421,7 +404,7 @@ def renderizar_aba_precificacao():
                 prazo = quantidade * 5
 
             st.info(
-                f"📅 Prazo de execução calculated: **{prazo} dias úteis**"
+                f"📅 Prazo de execução calculado: **{prazo} dias úteis**"
             )
 
             total_cheio = valor_base * quantidade
@@ -530,7 +513,6 @@ def renderizar_aba_precificacao():
         }
 
     else:
-        # --- CENÁRIO TERCEIRIZADO ---
         st.markdown(
             "<h4 style='color: #003366;'>📂 Upload do Orçamento do Laboratório</h4>",
             unsafe_allow_html=True,
@@ -604,7 +586,6 @@ def renderizar_aba_precificacao():
             ),
         )
 
-        # Matemática da planilha: = B4 + 110 + 0.18*(B4 + 110)
         margem_fixa_setor = 110.00
         subtotal_terc = orcamento_lab + margem_fixa_setor
         taxas_de_nota = subtotal_terc * 0.18
