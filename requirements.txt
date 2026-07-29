@@ -6,3 +6,4 @@ google-generativeai
 python-docx
 reportlab
 werkzeug
+xlsxwriter
