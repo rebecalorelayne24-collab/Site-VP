@@ -40,24 +40,33 @@ def calcular_data_final_uteis(data_inicial, dias_uteis):
     return data_atual
 
 
+def extrair_valor_por_regex(texto):
+    """Procura padrões de valores em R$ no texto do PDF sem gastar cota de IA."""
+    padroes = [
+        r"(?:total|valor total|total a pagar|subtotal|valor geral|valor)[\s\:\=]*r\$\s*([\d\.\,]+)",
+        r"r\$\s*([\d\.\,]+)",
+    ]
+    for padrao in padroes:
+        matches = re.findall(padrao, texto, re.IGNORECASE)
+        for match in matches:
+            val_str = match.strip()
+            if "," in val_str and "." in val_str:
+                val_str = val_str.replace(".", "").replace(",", ".")
+            elif "," in val_str:
+                val_str = val_str.replace(",", ".")
+            try:
+                val_num = float(val_str)
+                if val_num > 0:
+                    return val_num
+            except ValueError:
+                continue
+    return None
+
+
 def extrair_valor_pdf_com_ia(arquivo_pdf):
-    """Lê o PDF do orçamento do laboratório e usa IA para extrair o valor bruto."""
+    """Extrai o valor bruto do PDF usando primeiro Regex (grátis) e Gemini (se necessário)."""
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
-            "GEMINI_API_KEY"
-        )
-        if api_key:
-            api_key = str(api_key).strip().strip('"').strip("'")
-
-        if not api_key:
-            st.error(
-                "API Key do Gemini não configurada. Adicione 'GEMINI_API_KEY'"
-                " nos secrets do Streamlit."
-            )
-            return None
-
-        client = genai.Client(api_key=api_key)
-
+        # 1. Tenta extração direta via PyPDF + Regex primeiro (Sem gasto de API)
         arquivo_pdf.seek(0)
         reader = PdfReader(arquivo_pdf)
         texto_completo = ""
@@ -66,30 +75,54 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
             if t:
                 texto_completo += t + "\n"
 
-        if not texto_completo.strip():
-            st.error("Não foi possível extrair texto legível do PDF enviado.")
+        texto_limpo = texto_completo.strip()
+
+        if len(texto_limpo) > 10:
+            val_regex = extrair_valor_por_regex(texto_limpo)
+            if val_regex and val_regex > 0:
+                return val_regex
+
+        # 2. Se o Regex não achou, consulta a IA via Gemini API
+        api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
+            "GEMINI_API_KEY"
+        )
+        if api_key:
+            api_key = str(api_key).strip().strip('"').strip("'")
+
+        if not api_key:
+            st.warning("⚠️ API Key do Gemini não configurada nos Secrets.")
             return None
 
+        client = genai.Client(api_key=api_key)
+
         prompt = """
-        Você é a inteligência do sistema financeiro da Farmácia Jr. (UFMG). 
-        Analise o texto extraído de um PDF de orçamento de laboratório parceiro e encontre o VALOR TOTAL BRUTO do serviço.
-        Retorne ESTRITAMENTE um JSON no seguinte formato, sem formatação markdown adicional ou blocos de código:
+        Você é a inteligência financeira da Farmácia Jr. (UFMG). 
+        Analise o texto do orçamento do laboratório e extraia o VALOR TOTAL BRUTO do serviço.
+        Retorne ESTRITAMENTE um JSON no seguinte formato:
         {"valor_total": 0.00}
         """
 
+        # Usa o modelo padrão mais leve para economizar cota de RPT
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"{prompt}\n\nTexto do PDF:\n{texto_completo}",
+            model="gemini-1.5-flash",
+            contents=f"{prompt}\n\nTexto do PDF:\n{texto_limpo}",
         )
 
-        texto_limpo = (
+        resp_txt = (
             response.text.strip().replace("```json", "").replace("```", "")
         )
-        dados_ia = json.loads(texto_limpo)
+        dados_ia = json.loads(resp_txt)
         return float(dados_ia.get("valor_total", 0.0))
 
     except Exception as e:
-        st.error(f"Erro ao processar o PDF com a IA: {e}")
+        erro_str = str(e)
+        if "429" in erro_str or "RESOURCE_EXHAUSTED" in erro_str:
+            st.warning(
+                "⏳ Limite de requisições por minuto da IA atingido. "
+                "Aguarde cerca de 1 minuto ou preencha o valor manualmente no campo abaixo."
+            )
+        else:
+            st.error(f"Não foi possível ler o valor automaticamente: {e}")
         return None
 
 
@@ -434,21 +467,29 @@ def renderizar_aba_precificacao():
             unsafe_allow_html=True,
         )
         arquivo_pdf = st.file_uploader(
-            "Arraste o arquivo PDF do laboratório parceiro aqui:", type=["pdf"]
+            "Arraste o arquivo PDF do laboratório parceiro aqui:",
+            type=["pdf"],
+            key="file_pdf_lab",
         )
 
-        orcamento_lab = 0.0
+        val_auto_detectado = 0.0
+
         if arquivo_pdf is not None:
-            with st.spinner(
-                "🤖 IA processando o PDF e extraindo o valor cobrado..."
-            ):
-                valor_extraido = extrair_valor_pdf_com_ia(arquivo_pdf)
-                if valor_extraido is not None:
-                    orcamento_lab = valor_extraido
+            with st.spinner("🤖 Processando arquivo de orçamento..."):
+                val_extraido = extrair_valor_pdf_com_ia(arquivo_pdf)
+                if val_extraido is not None and val_extraido > 0:
+                    val_auto_detectado = val_extraido
                     st.success(
-                        "✅ Processado com sucesso! Valor base do laboratório"
-                        f" identificado: **R$ {orcamento_lab:,.2f}**"
+                        "✅ Sucesso! Valor do laboratório identificado: **R$"
+                        f" {val_auto_detectado:,.2f}**"
                     )
+
+        orcamento_lab = st.number_input(
+            "Valor do Orçamento do Laboratório (R$):",
+            min_value=0.0,
+            value=float(val_auto_detectado),
+            step=50.0,
+        )
 
         col1, col2 = st.columns(2)
         with col1:
@@ -556,6 +597,7 @@ def renderizar_aba_precificacao():
             mime=(
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ),
+            use_container_width=True,
         )
     else:
         st.warning(
