@@ -133,6 +133,21 @@ if not st.session_state.logado:
     from database.conexao_db import inicializar_banco_dados
     inicializar_banco_dados()
 
+    # --- FORÇAR CORREÇÃO DA SENHA PADRÃO NO BANCO ---
+    try:
+        conn_fix = get_connection()
+        cur_fix = conn_fix.cursor()
+        hash_padrao = hashlib.sha256("123456".encode("utf-8")).hexdigest()
+        cur_fix.execute("""
+            UPDATE usuarios 
+            SET senha = ?, primeiro_login = 0 
+            WHERE email IN ('vice-presidencia@farmaciajr.com', 'presidencia@farmaciajr.com')
+        """, (hash_padrao,))
+        conn_fix.commit()
+    except Exception:
+        pass
+    # ------------------------------------------------
+
     _, col2, _ = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
