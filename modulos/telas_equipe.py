@@ -7,31 +7,25 @@ import pandas as pd
 import streamlit as st
 from werkzeug.security import check_password_hash, generate_password_hash
 
-# Mesmo banco usado por app.py, dashboard.py, fluxo_caixa.py e eventos_grandes.py.
-# (Antes este arquivo usava "financeiro_farmaciajr.db", um arquivo diferente —
-# isso fazia a tabela de usuários daqui divergir da tabela usada no login.)
 DB_PATH = "database/financeiro_v2.db"
 
-# Paleta Oficial de Cores por Diretoria da EJ
 CORES_DIRETORIAS = {
-    "VP": "#FF69B4",  # Rosa
-    "IMAGEM": "#8A2BE2",  # Roxo
-    "PROJETOS": "#1E90FF",  # Azul
-    "NEGÓCIOS": "#2E8B57",  # Verde
-    "AR": "#FF8C00",  # Laranja
-    "PRESIDÊNCIA": "#DAA520",  # Dourado/Amarelo
+    "VP": "#FF69B4",
+    "IMAGEM": "#8A2BE2",
+    "PROJETOS": "#1E90FF",
+    "NEGÓCIOS": "#2E8B57",
+    "AR": "#FF8C00",
+    "PRESIDÊNCIA": "#DAA520",
 }
 
 
 def converter_imagem_para_base64(imagem_arquivo):
-    """Converte a imagem enviada para Base64 otimizada."""
     if imagem_arquivo is not None:
         return base64.b64encode(imagem_arquivo.read()).decode("utf-8")
     return ""
 
 
 def inicializar_banco_equipe_expandido():
-    """Garante que a tabela de usuários possua toda a estrutura de RH comercial e colunas atualizadas."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -59,7 +53,6 @@ def inicializar_banco_equipe_expandido():
     """
     )
 
-    # Verifica e aplica migrations de colunas para bancos antigos
     cursor.execute("PRAGMA table_info(usuarios)")
     colunas_existentes = [coluna[1] for coluna in cursor.fetchall()]
 
@@ -89,22 +82,16 @@ def inicializar_banco_equipe_expandido():
 
 
 def renderizar_tela_troca_senha(email_usuario):
-    """Módulo obrigatório de primeiro acesso para segurança com hash de senha."""
+    """Módulo obrigatório de primeiro acesso utilizando o hash seguro do Werkzeug."""
     st.markdown(
-        "<h3 style='color: #FF1493; text-align: center;'>🔒 Primeiro Acesso -"
-        " Atualize sua Senha</h3>",
+        "<h3 style='color: #FF1493; text-align: center;'>🔒 Primeiro Acesso — Atualize sua Senha</h3>",
         unsafe_allow_html=True,
     )
-    st.write(
-        "Por motivos de segurança da EJ, altere a senha padrão antes de"
-        " acessar a plataforma."
-    )
+    st.write("Por motivos de segurança da EJ, altere a senha padrão antes de acessar a plataforma.")
 
     with st.form("form_troca_senha"):
         nova_senha = st.text_input("Digite sua Nova Senha:", type="password")
-        confirma_senha = st.text_input(
-            "Confirme a Nova Senha:", type="password"
-        )
+        confirma_senha = st.text_input("Confirme a Nova Senha:", type="password")
 
         if st.form_submit_button("🔒 Salvar Nova Senha Criptografada e Entrar"):
             if len(nova_senha) < 6:
@@ -132,7 +119,6 @@ def renderizar_tela_troca_senha(email_usuario):
 
 
 def renderizar_gerenciamento_equipe(email_logado):
-    """Sistema Profissional de Gestão de Pessoas, Organograma e Indicadores de RH da Farmácia Jr."""
     inicializar_banco_equipe_expandido()
 
     st.markdown(
@@ -140,12 +126,10 @@ def renderizar_gerenciamento_equipe(email_logado):
         unsafe_allow_html=True,
     )
 
-    # 1. CARREGAMENTO DOS DADOS DA EQUIPE
     conn = sqlite3.connect(DB_PATH)
     df_users = pd.read_sql_query("SELECT * FROM usuarios", conn)
     conn.close()
 
-    # 2. DASHBOARD DE ESTATÍSTICAS E INDICADORES DE RH
     st.markdown("---")
     m1, m2, m3, m4 = st.columns(4)
     tot_membros = len(df_users)
@@ -158,26 +142,10 @@ def renderizar_gerenciamento_equipe(email_logado):
     m3.metric("🎓 Assessores", tot_assessores)
     m4.metric("🟢 Membros Ativos", tot_ativos)
 
-    # Gráfico Visual de Distribuição por Diretoria
-    if not df_users.empty and "departamento" in df_users.columns:
-        with st.expander("📊 Distribuição da Equipe por Diretoria", expanded=False):
-            dist_dept = df_users["departamento"].value_counts()
-            for dept, count in dist_dept.items():
-                cor = CORES_DIRETORIAS.get(dept, "#C71585")
-                pct = int((count / tot_membros) * 100) if tot_membros > 0 else 0
-                st.markdown(
-                    f"**{dept}** ({count} membros - {pct}%)"
-                )
-                st.progress(pct / 100)
-
-    # 3. ABAS DE NAVEGAÇÃO DO RH
     tab_equipe, tab_meu_perfil, tab_cadastrar = st.tabs(
         ["📋 Organograma & Equipe", "✨ Meu Perfil & Acesso", "➕ Cadastrar Novo Membro"]
     )
 
-    # =========================================================================
-    # ABA 1: ORGANOGRAMA & LISTAGEM DE MEMBROS
-    # =========================================================================
     with tab_equipe:
         c_busca, c_filtro_dept, c_filtro_status = st.columns([2, 1, 1])
         with c_busca:
@@ -187,7 +155,6 @@ def renderizar_gerenciamento_equipe(email_logado):
         with c_filtro_status:
             filtro_status = st.selectbox("📌 Status:", ["Todos", "Ativo", "Afastado", "Desligado", "Ex-membro"])
 
-        # Aplicação dos Filtros
         df_filtrado = df_users.copy()
         if termo_busca:
             df_filtrado = df_filtrado[
@@ -205,11 +172,8 @@ def renderizar_gerenciamento_equipe(email_logado):
         if df_filtrado.empty:
             st.info("Nenhum membro encontrado com os filtros selecionados.")
         else:
-            # Exibição dos Cards Profissionais
             for _, row in df_filtrado.iterrows():
                 cor_borda = CORES_DIRETORIAS.get(row["departamento"], "#FF1493")
-
-                # Indicador de Status Visual
                 status_icon = "🟢" if row["status"] == "Ativo" else ("🟡" if row["status"] == "Afastado" else "🔴")
 
                 if row["foto_base64"]:
@@ -217,7 +181,6 @@ def renderizar_gerenciamento_equipe(email_logado):
                 else:
                     img_html = f"<div style='width:70px; height:70px; border-radius:50%; background-color:#FFF0F5; display:flex; align-items:center; justify-content:center; font-size:32px; border: 2px solid {cor_borda}; margin-right:15px;'>👤</div>"
 
-                # Links de Redes Sociais
                 tel_clean = re.sub(r"\D", "", str(row["telefone"]))
                 link_wa = f"https://wa.me/55{tel_clean}" if len(tel_clean) >= 10 else "#"
 
@@ -247,7 +210,6 @@ def renderizar_gerenciamento_equipe(email_logado):
                     if row["email"] == email_logado:
                         st.caption("✨ Seu Perfil")
                     else:
-                        # Modal de confirmação segura antes da exclusão
                         with st.popover("🗑️ Opções", use_container_width=True):
                             st.warning(f"Ação permanente para **{row['nome']}**:")
                             if st.button("Confirmar Exclusão", key=f"conf_del_{row['id']}", type="primary", use_container_width=True):
@@ -259,9 +221,6 @@ def renderizar_gerenciamento_equipe(email_logado):
                                 st.success("Membro removido do sistema!")
                                 st.rerun()
 
-    # =========================================================================
-    # ABA 2: MEU PERFIL E AUTO-SERVIÇO
-    # =========================================================================
     with tab_meu_perfil:
         meu_perfil = df_users[df_users["email"] == email_logado]
         if not meu_perfil.empty:
@@ -288,12 +247,10 @@ def renderizar_gerenciamento_equipe(email_logado):
                     conn = sqlite3.connect(DB_PATH)
                     cursor = conn.cursor()
 
-                    # Atualiza foto se enviada
                     foto_str = dados_eu["foto_base64"]
                     if nova_foto:
                         foto_str = converter_imagem_para_base64(nova_foto)
 
-                    # Valida alteração de senha se preenchida
                     if nova_senha_input:
                         if check_password_hash(dados_eu["senha"], senha_atual_input) or dados_eu["senha"] == senha_atual_input:
                             hash_nova = generate_password_hash(nova_senha_input)
@@ -323,9 +280,6 @@ def renderizar_gerenciamento_equipe(email_logado):
                     conn.close()
                     st.rerun()
 
-    # =========================================================================
-    # ABA 3: CADASTRO DE NOVOS MEMBROS
-    # =========================================================================
     with tab_cadastrar:
         st.markdown("#### ➕ Cadastrar Novo Acesso / Membro da Farmácia Jr.")
         with st.form("form_novo_membro_rh", clear_on_submit=True):
@@ -345,7 +299,6 @@ def renderizar_gerenciamento_equipe(email_logado):
 
             if st.form_submit_button("🚀 Finalizar Cadastro com Criptografia"):
                 if nome_c and email_c:
-                    # Criptografa a senha padrão 'farmaciajr123'
                     senha_padrao_hash = generate_password_hash("farmaciajr123")
                     foto_str = converter_imagem_para_base64(foto_c)
 
