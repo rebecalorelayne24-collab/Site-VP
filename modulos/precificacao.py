@@ -78,7 +78,7 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
         """
 
         # Modelo estável que não estoura o limite de cota da API
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3.6-flash")
         response = model.generate_content(
             f"{prompt}\n\nTexto do PDF:\n{texto_completo}",
             generation_config=genai.types.GenerationConfig(temperature=0.0),
