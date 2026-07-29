@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -41,7 +42,7 @@ def calcular_data_final_uteis(data_inicial, dias_uteis):
 
 @st.cache_data(show_spinner=False)
 def _processar_pdf_ia_cached(bytes_pdf_content, api_key):
-    """Função interna em cache para ler o PDF via Gemini sem gastar cota em re-renders do Streamlit."""
+    """Muda para o modelo estável em cache sem consumir cota em cliques repetidos do Streamlit."""
     genai.configure(api_key=api_key)
 
     reader = PdfReader(io.BytesIO(bytes_pdf_content))
@@ -61,7 +62,7 @@ def _processar_pdf_ia_cached(bytes_pdf_content, api_key):
     {"valor_total": 0.00}
     """
 
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(
         f"{prompt}\n\nTexto do PDF:\n{texto_completo}",
         generation_config=genai.types.GenerationConfig(temperature=0.0),
@@ -75,7 +76,7 @@ def _processar_pdf_ia_cached(bytes_pdf_content, api_key):
 
 
 def extrair_valor_pdf_com_ia(arquivo_pdf):
-    """Lê o PDF do orçamento do laboratório usando cache para preservar requisições."""
+    """Lê o PDF do orçamento do laboratório e extrai o valor utilizando o cache para economizar chamadas."""
     try:
         api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
             "GEMINI_API_KEY"
@@ -104,7 +105,7 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
         erro_str = str(e)
         if "429" in erro_str or "RESOURCE_EXHAUSTED" in erro_str:
             st.warning(
-                "⏳ Cota diária/minuto do Gemini gratuita atingida. Insira o valor do laboratório manualmente no campo abaixo."
+                "⏳ Cota gratuita da API atingida temporariamente. Digite o valor do laboratório no campo abaixo."
             )
         else:
             st.error(f"Erro ao processar o PDF com a IA: {e}")
@@ -112,14 +113,14 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
 
 
 def obter_texto_parcelamento(servico, valor_total):
-    """Aplica as regras da planilha e já calcula o valor matemático de cada parcela"""
+    """Aplica as regras da planilha e calcula o valor de cada parcela"""
     if servico == "Revisão Bibliográfica":
         return "Consulte o diretor"
 
     num_parcelas = 1
     texto_especial = None
 
-    if servico == "Rotulagem Nutricional":
+    if servico in ["Rotulagem Nutricional", "Rotulagem de cosméticos"]:
         if valor_total < 200:
             num_parcelas = 1
         elif valor_total < 600:
@@ -149,16 +150,20 @@ def obter_texto_parcelamento(servico, valor_total):
         return texto_especial
 
     if num_parcelas == 1:
-        return f"À vista (R$ {valor_total:.2f})"
+        v_str = f"R$ {valor_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"à vista ({v_str})"
     else:
         valor_da_parcela = valor_total / num_parcelas
-        return f"{num_parcelas} parcelas de R$ {valor_da_parcela:.2f}"
+        v_parc_str = f"R$ {valor_da_parcela:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        v_tot_str = f"R$ {valor_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"à vista ({v_tot_str}) ou {num_parcelas}X de {v_parc_str}"
 
 
 def gerar_docx_proposta(dados):
-    """Gera o documento Word (.docx) seguindo fielmente o modelo da Farmácia Jr."""
+    """Gera o documento Word (.docx) reproduzindo fielmente o layout oficial da Farmácia Jr."""
     doc = docx.Document()
 
+    # Margens padrão (2.54 cm / 1 polegada)
     for section in doc.sections:
         section.top_margin = Inches(1)
         section.bottom_margin = Inches(1)
@@ -170,56 +175,75 @@ def gerar_docx_proposta(dados):
     font.name = "Arial"
     font.size = Pt(11)
 
-    data_validade = calcular_data_final_uteis(
-        obter_agora_br(), 15
-    ).strftime("%d/%m/%Y")
+    agora = obter_agora_br()
+    data_validade = calcular_data_final_uteis(agora, 15).strftime("%d/%m/%Y")
 
+    # 1. Validade (Topo Alinhado à Direita)
     p_val = doc.add_paragraph()
-    p_val.add_run(f"Validade precificação: {data_validade}").font.size = Pt(10)
+    p_val.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    run_val = p_val.add_run(f"Validade precificação:\n{data_validade}")
+    run_val.font.size = Pt(10)
 
+    # 2. Título do Cliente (Centralizado e em Negrito)
     p_tit = doc.add_paragraph()
     p_tit.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_tit = p_tit.add_run(f"\nPrecificação – {dados['nome_lead']}")
     run_tit.bold = True
-    run_tit.size = Pt(14)
+    run_tit.font.size = Pt(14)
 
+    # 3. Subtítulo (Nome do Serviço)
     p_sub = doc.add_paragraph()
-    p_sub.add_run(f"{dados['nome_servico'].upper()}").bold = True
+    run_sub = p_sub.add_run(f"{dados['nome_servico']}")
+    run_sub.bold = True
 
     if dados["tipo_servico"] == "Serviço Autoral (Farmácia Jr.)":
+        # ---------------------------------------------------------------------
+        # 1ª OPÇÃO - PRECIFICAÇÃO CHEIA
+        # ---------------------------------------------------------------------
         doc.add_paragraph().add_run("1° opção – Precificação cheia").bold = True
 
-        table1 = doc.add_table(rows=2, cols=4)
-        table1.style = "Table Grid"
-        hdr = table1.rows[0].cells
-        hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text = (
+        tbl1 = doc.add_table(rows=2, cols=4)
+        tbl1.style = "Table Grid"
+
+        hdr1 = tbl1.rows[0].cells
+        hdr1[0].text, hdr1[1].text, hdr1[2].text, hdr1[3].text = (
             "Serviços",
             "Valor unitário",
             "Quantidade proposta",
             "Total",
         )
 
-        row1 = table1.rows[1].cells
+        row1 = tbl1.rows[1].cells
         row1[0].text = dados["nome_servico"]
-        row1[1].text = f"R$ {dados['valor_base']:.2f}"
+        row1[1].text = f"R$ {dados['valor_base']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         row1[2].text = str(dados["quantidade"])
-        row1[3].text = f"R$ {dados['total_cheio']:.2f}"
+        row1[3].text = f"R$ {dados['total_cheio']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        doc.add_paragraph(
-            f"\nPrazo de execução: {dados['prazo']} dias úteis (Previsão de"
-            f" entrega: {dados['data_entrega_autoral']})"
-        )
-        doc.add_paragraph(
-            f"Formas de pagamento: {dados['parcelas_cheio']}"
-        )
+        doc.add_paragraph(f"\nPrazo de execução: {dados['prazo']} dias úteis")
+        doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_cheio']}")
 
-        doc.add_paragraph().add_run(
-            f"\n2° opção – desconto de acordo [{dados['motivo_desconto']}]"
-        ).bold = True
+        doc.add_paragraph()  # Espaçador
 
-        table2 = doc.add_table(rows=2, cols=4)
-        table2.style = "Table Grid"
-        hdr2 = table2.rows[0].cells
+        # ---------------------------------------------------------------------
+        # 2ª OPÇÃO - DESCONTO DE ACORDO
+        # ---------------------------------------------------------------------
+        doc.add_paragraph().add_run("2° opção – desconto de acordo").bold = True
+
+        # Marcadores de desconto em tópicos
+        if dados.get("motivos_lista") and isinstance(dados["motivos_lista"], list):
+            for motivo in dados["motivos_lista"]:
+                p_item = doc.add_paragraph(style="List Bullet")
+                p_item.add_run(motivo)
+        elif dados.get("motivo_desconto"):
+            for motivo in dados["motivo_desconto"].split(", "):
+                if motivo.strip():
+                    p_item = doc.add_paragraph(style="List Bullet")
+                    p_item.add_run(motivo.strip())
+
+        tbl2 = doc.add_table(rows=2, cols=4)
+        tbl2.style = "Table Grid"
+
+        hdr2 = tbl2.rows[0].cells
         hdr2[0].text, hdr2[1].text, hdr2[2].text, hdr2[3].text = (
             "Serviços",
             "Valor unitário",
@@ -227,26 +251,25 @@ def gerar_docx_proposta(dados):
             "Total",
         )
 
-        row2 = table2.rows[1].cells
+        row2 = tbl2.rows[1].cells
         row2[0].text = dados["nome_servico"]
-        row2[1].text = f"R$ {dados['unitario_desconto']:.2f}"
+        row2[1].text = f"R$ {dados['unitario_desconto']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         row2[2].text = str(dados["quantidade"])
-        row2[3].text = f"R$ {dados['total_desconto']:.2f}"
+        row2[3].text = f"R$ {dados['total_desconto']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        doc.add_paragraph(
-            f"\nPrazo de execução: {dados['prazo']} dias úteis (Previsão de"
-            f" entrega: {dados['data_entrega_autoral']})"
-        )
-        doc.add_paragraph(
-            f"Formas de pagamento: {dados['parcelas_desconto']}"
-        )
+        doc.add_paragraph(f"\nPrazo de execução: {dados['prazo']} dias úteis")
+        doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_desconto']}")
 
     else:
+        # ---------------------------------------------------------------------
+        # TERCEIRIZADO (LABORATÓRIO)
+        # ---------------------------------------------------------------------
         doc.add_paragraph().add_run("1° opção – Precificação cheia").bold = True
 
-        table3 = doc.add_table(rows=2, cols=4)
-        table3.style = "Table Grid"
-        hdr3 = table3.rows[0].cells
+        tbl3 = doc.add_table(rows=2, cols=4)
+        tbl3.style = "Table Grid"
+
+        hdr3 = tbl3.rows[0].cells
         hdr3[0].text, hdr3[1].text, hdr3[2].text, hdr3[3].text = (
             "Serviços",
             "Valor unitário",
@@ -254,20 +277,18 @@ def gerar_docx_proposta(dados):
             "Total",
         )
 
-        row3 = table3.rows[1].cells
+        row3 = tbl3.rows[1].cells
         row3[0].text = dados["nome_servico"]
-        row3[1].text = f"R$ {dados['total_terceirizado']:.2f}"
+        row3[1].text = f"R$ {dados['total_terceirizado']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         row3[2].text = "1"
-        row3[3].text = f"R$ {dados['total_terceirizado']:.2f}"
+        row3[3].text = f"R$ {dados['total_terceirizado']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
         doc.add_paragraph(
-            f"\nPrazo de execução: {dados['prazo_terceirizado']} dias (Incluso"
-            " prazo de segurança da EJ. Previsão:"
-            f" {dados['data_entrega_terc']})"
+            f"\nPrazo de execução: {dados['prazo_terceirizado']} dias (Incluso prazo de segurança da EJ. Previsão: {dados['data_entrega_terc']})"
         )
-        doc.add_paragraph(
-            f"Formas de pagamento: {dados['parcelas_terceirizado']}"
-        )
+        doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_terceirizado']}")
+
+        doc.add_paragraph()
 
         p_param = doc.add_paragraph()
         p_param.add_run("Parâmetros analisados:\n").bold = True
@@ -339,7 +360,7 @@ def renderizar_aba_precificacao():
                 prazo = quantidade * 5
 
             st.info(
-                f"📅 Prazo de execução calculated: **{prazo} dias úteis**"
+                f"📅 Prazo de execução calculado: **{prazo} dias úteis**"
             )
 
             total_cheio = valor_base * quantidade
@@ -353,8 +374,7 @@ def renderizar_aba_precificacao():
         )
 
         st.markdown(
-            "<h4 style='color: #FF1493;'>🔍 Seleção de Descontos (Limite Máximo"
-            " de 15%)</h4>",
+            "<h4 style='color: #FF1493;'>🔍 Seleção de Descontos (Limite Máximo de 15%)</h4>",
             unsafe_allow_html=True,
         )
 
@@ -376,28 +396,28 @@ def renderizar_aba_precificacao():
             motivos.append("Microempreendedor")
         if desc_nova:
             soma_descontos += 2.5
-            motivos.append("Empresa Nova")
+            motivos.append("Empresa nova")
         if desc_antigo:
             soma_descontos += 5.0
-            motivos.append("Cliente Antigo")
+            motivos.append("Cliente antigo da EJ")
         if desc_novo_cli:
             soma_descontos += 1.25
-            motivos.append("Novo Cliente")
+            motivos.append("Novos clientes")
         if desc_mulher:
             soma_descontos += 1.75
-            motivos.append("Líderes Mulheres")
+            motivos.append("Líderes mulheres")
         if desc_combo:
             soma_descontos += 5.0
-            motivos.append("Mais de um Serviço")
+            motivos.append("Mais de um serviço")
         if desc_qtd:
             soma_descontos += 5.0
-            motivos.append("Quantidade de Produto")
+            motivos.append("Quantidade de produto")
         if desc_indica:
             soma_descontos += 5.0
-            motivos.append("Indicação")
+            motivos.append("Indicação de cliente")
         if desc_ufmg:
             soma_descontos += 2.5
-            motivos.append("Ex-aluno UFMG")
+            motivos.append("Vínculo UFMG")
 
         desconto_final_pct = min(soma_descontos, 15.0)
         motivo_txt = (
@@ -442,6 +462,7 @@ def renderizar_aba_precificacao():
             "data_entrega_autoral": data_entrega,
             "parcelas_cheio": parcelas_cheio,
             "parcelas_desconto": parcelas_desconto,
+            "motivos_lista": motivos,
             "motivo_desconto": motivo_txt,
             "unitario_desconto": unitario_desconto,
             "total_desconto": total_desconto,
@@ -450,8 +471,7 @@ def renderizar_aba_precificacao():
     else:
         # --- CENÁRIO TERCEIRIZADO ---
         st.markdown(
-            "<h4 style='color: #FF1493;'>📂 Upload do Orçamento do"
-            " Laboratório</h4>",
+            "<h4 style='color: #FF1493;'>📂 Upload do Orçamento do Laboratório</h4>",
             unsafe_allow_html=True,
         )
         arquivo_pdf = st.file_uploader(
@@ -587,6 +607,7 @@ def renderizar_aba_precificacao():
             mime=(
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ),
+            use_container_width=True,
         )
     else:
         st.warning(
