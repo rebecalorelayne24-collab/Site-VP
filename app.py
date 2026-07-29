@@ -24,17 +24,16 @@ def setup_gemini():
 
 setup_gemini()
 
-# 2b. Conexão SQLite global otimizada e cacheada na memória
-@st.cache_resource
+# 2b. Conexão SQLite segura (abre e fecha por transação para evitar ProgrammingError)
 def get_connection():
     return sqlite3.connect("database/financeiro_v2.db", check_same_thread=False)
 
-# Função blindada de verificação (Corrige qualquer falha de hash ou texto puro)
+# Função blindada de verificação de credenciais
 def verificar_credenciais_app(email, senha):
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Garante que a tabela existe e injeta o usuário admin caso esteja vazia
+    # Garante que a tabela existe
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,7 +68,7 @@ def verificar_credenciais_app(email, senha):
     nome, senha_db, primeiro_login, departamento = user
     conn.close()
     
-    # Validação inteligente: aceita senha em texto limpo OU hash SHA-256
+    # Validação inteligente: aceita senha em texto limpo, hash SHA-256 ou a padrão '123456'
     senha_hash_digitada = hashlib.sha256(senha.encode("utf-8")).hexdigest()
     
     if senha == senha_db or senha_hash_digitada == senha_db or (senha == "123456"):
@@ -196,6 +195,7 @@ elif st.session_state.logado and st.session_state.primeiro_login == 1:
     cursor = conn.cursor()
     cursor.execute("SELECT primeiro_login FROM usuarios WHERE email = ?", (st.session_state.email_usuario,))
     resultado = cursor.fetchone()
+    conn.close()
 
     if resultado and resultado[0] == 1:
         from modulos.telas_equipe import renderizar_tela_troca_senha
