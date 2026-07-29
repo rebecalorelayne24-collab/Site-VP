@@ -1,4 +1,4 @@
-import os
+    import os
 import sqlite3
 import streamlit as st
 
@@ -10,25 +10,37 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 2. Configuração do Gemini em cache de recurso (só carrega se houver chave)
+# 2. Configuração do Gemini em cache de recurso (import + init só se houver key)
 @st.cache_resource
 def setup_gemini():
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return False
-    import google.generativeai as genai
+    import google.generativeai as genai  # import pesado só roda se a key existir
     os.environ["GEMINI_API_KEY"] = api_key
     genai.configure(api_key=api_key)
     return True
 
 setup_gemini()
 
+# 2b. Conexão SQLite reutilizável (evita abrir/fechar conexão a cada rerun)
 # 2b. Conexão SQLite global otimizada e cacheada na memória
 @st.cache_resource
 def get_connection():
-    return sqlite3.connect("database/financeiro_v2.db", check_same_thread=False)
+    conn = sqlite3.connect("database/financeiro_v2.db", check_same_thread=False)
+    # WAL é uma propriedade gravada no arquivo do banco: configurando aqui,
+    # TODAS as conexões abertas por outros módulos (mesmo sqlite3.connect() soltos)
+    # passam a se beneficiar — leituras não ficam mais bloqueadas por escritas.
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")  # espera até 5s antes de falhar por lock
+    conn.execute("PRAGMA synchronous=NORMAL;")  # seguro com WAL e mais rápido que FULL
+    return conn
 
-# 3. Estilo CSS Cacheado para renderização instantânea
+# Garante que o WAL seja ativado logo na inicialização do processo,
+# independente de qual tela o usuário cair primeiro.
+get_connection()
+
+# 3. CSS Otimizado e Cacheado na Memória
 @st.cache_data
 def aplicar_estilo_ui():
     return """
@@ -103,7 +115,7 @@ if "departamento_usuario" not in st.session_state:
     st.session_state.departamento_usuario = "Geral"
 
 # =======================================================================
-# FLUXO DE TELA 1: LOGIN
+# FLUXO DE TELA 1: LOGIN (Importações sob demanda)
 # =======================================================================
 if not st.session_state.logado:
     from database.conexao_db import inicializar_banco_dados
@@ -140,7 +152,8 @@ if not st.session_state.logado:
                 st.error("Por favor, preencha o e-mail e a senha.")
 
 # =======================================================================
-# FLUXO DE TELA 2: TROCA DE SENHA OBRIGATÓRIA (PRIMEIRO ACESSO)
+# FLUXO DE TELA 2: TROCA DE SENHA
+# (usa a conexão cacheada em vez de abrir uma nova a cada rerun)
 # =======================================================================
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
     conn = get_connection()
@@ -148,7 +161,15 @@ elif st.session_state.logado and st.session_state.primeiro_login == 1:
     cursor.execute("SELECT primeiro_login FROM usuarios WHERE email = ?", (st.session_state.email_usuario,))
     resultado = cursor.fetchone()
 
-    if resultado and resultado[0] == 1:
+    if resultado is None:
+        # Usuário não encontrado (ex: registro removido entre o login e agora).
+        # Por segurança, desloga em vez de liberar acesso silenciosamente.
+        st.session_state.logado = False
+        st.session_state.email_usuario = ""
+        st.session_state.primeiro_login = 1
+        st.error("Sua sessão expirou ou o usuário não foi encontrado. Faça login novamente.")
+        st.rerun()
+    elif resultado[0] == 1:
         from modulos.telas_equipe import renderizar_tela_troca_senha
         renderizar_tela_troca_senha(st.session_state.email_usuario)
     else:
@@ -156,7 +177,7 @@ elif st.session_state.logado and st.session_state.primeiro_login == 1:
         st.rerun()
 
 # =======================================================================
-# FLUXO DE TELA 3: PAINEL PRINCIPAL COM LAZY LOADING
+# FLUXO DE TELA 3: PAINEL PRINCIPAL (LAZY LOADING DE MÓDULOS)
 # =======================================================================
 else:
     st.sidebar.markdown("<h2 style='color: #FFFFFF !important;'>🦩 Setor VP</h2>", unsafe_allow_html=True)
@@ -189,7 +210,7 @@ else:
         st.session_state.departamento_usuario = "Geral"
         st.rerun()
 
-    # --- ROTEAMENTO INTELIGENTE (Carrega estritamente o módulo da aba selecionada) ---
+    # --- ROTEAMENTO INTELIGENTE (Importa apenas o arquivo da página ativa) ---
     if menu == "Dashboard Geral":
         from modulos.dashboard import renderizar_dashboard_geral
         renderizar_dashboard_geral()
