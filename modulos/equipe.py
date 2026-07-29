@@ -1,44 +1,25 @@
 import sqlite3
+import hashlib
 
-# Caminho unificado do banco de dados da aplicação
-DB_PATH = 'database/financeiro_v2.db'
+# Função de hash compatível com hashlib (caso esteja usando sha256)
+def gerar_hash_senha(senha_texto):
+    return hashlib.sha256(senha_texto.encode("utf-8")).hexdigest()
 
-def verificar_credenciais(email, senha):
-    """
-    Verifica se o e-mail e a senha correspondem a um usuário cadastrado e ativo.
-    """
-    email_limpo = email.strip().lower()
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute("""
-            SELECT nome, primeiro_login, departamento, status, senha 
-            FROM usuarios 
-            WHERE LOWER(email) = ?
-        """, (email_limpo,))
-        usuario = cursor.fetchone()
-    except sqlite3.OperationalError as e:
-        conn.close()
-        return {"sucesso": False, "mensagem": f"Erro na tabela do banco de dados: {e}"}
-    
-    conn.close()
-    
-    if usuario:
-        nome, primeiro_login, departamento, status, senha_banco = usuario
-        
-        if status != 'Ativo':
-            return {"sucesso": False, "mensagem": "Usuário inativo. Solicite o acesso à Vice-Presidência."}
-            
-        if senha == senha_banco:
-            return {
-                "sucesso": True,
-                "nome": nome,
-                "primeiro_login": primeiro_login,
-                "departamento": departamento
-            }
-        else:
-            return {"sucesso": False, "mensagem": "Senha incorreta. Tente novamente."}
-    else:
-        return {"sucesso": False, "mensagem": "Usuário não cadastrado. Solicite o acesso à Vice-Presidência."}
+conn = sqlite3.connect("database/financeiro_v2.db")
+cursor = conn.cursor()
+
+# Substitua pelo e-mail que você está tentando usar para entrar
+email_alvo = "vice-presidencia@farmaciajr.com" 
+
+# Reseta a senha para 'farmaciajr123' e força o primeiro login
+nova_senha_hash = gerar_hash_senha("farmaciajr123")
+
+cursor.execute("""
+    UPDATE usuarios 
+    SET senha = ?, primeiro_login = 1 
+    WHERE email = ?
+""", (nova_senha_hash, email_alvo))
+
+conn.commit()
+conn.close()
+print(f"Senha do usuário {email_alvo} resetada para 'farmaciajr123' com sucesso!")
