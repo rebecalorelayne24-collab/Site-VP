@@ -39,10 +39,44 @@ def calcular_data_final_uteis(data_inicial, dias_uteis):
     return data_atual
 
 
+@st.cache_data(show_spinner=False)
+def _processar_pdf_ia_cached(bytes_pdf_content, api_key):
+    """Função interna em cache para ler o PDF via Gemini sem gastar cota em re-renders do Streamlit."""
+    genai.configure(api_key=api_key)
+
+    reader = PdfReader(io.BytesIO(bytes_pdf_content))
+    texto_completo = ""
+    for page in reader.pages:
+        texto_extraido = page.extract_text()
+        if texto_extraido:
+            texto_completo += texto_extraido + "\n"
+
+    if not texto_completo.strip():
+        return None, "Não foi possível extrair texto legível do PDF enviado."
+
+    prompt = """
+    Você é a inteligência do sistema financeiro da Farmácia Jr. (UFMG). 
+    Analise o texto extraído de um PDF de orçamento de laboratório parceiro e encontre o VALOR TOTAL BRUTO do serviço.
+    Retorne ESTRITAMENTE um JSON no seguinte formato, sem formatação markdown adicional ou blocos de código:
+    {"valor_total": 0.00}
+    """
+
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(
+        f"{prompt}\n\nTexto do PDF:\n{texto_completo}",
+        generation_config=genai.types.GenerationConfig(temperature=0.0),
+    )
+
+    texto_limpo = (
+        response.text.strip().replace("```json", "").replace("```", "")
+    )
+    dados_ia = json.loads(texto_limpo)
+    return float(dados_ia.get("valor_total", 0.0)), None
+
+
 def extrair_valor_pdf_com_ia(arquivo_pdf):
-    """Lê o PDF do orçamento do laboratório e usa IA para extrair o valor bruto"""
+    """Lê o PDF do orçamento do laboratório usando cache para preservar requisições."""
     try:
-        # Busca a API Key dos secrets do Streamlit
         api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
             "GEMINI_API_KEY"
         )
@@ -56,42 +90,24 @@ def extrair_valor_pdf_com_ia(arquivo_pdf):
             )
             return None
 
-        genai.configure(api_key=api_key)
-
         arquivo_pdf.seek(0)
-        reader = PdfReader(arquivo_pdf)
-        texto_completo = ""
-        for page in reader.pages:
-            texto_extraido = page.extract_text()
-            if texto_extraido:
-                texto_completo += texto_extraido + "\n"
+        bytes_pdf = arquivo_pdf.read()
 
-        if not texto_completo.strip():
-            st.error("Não foi possível extrair texto legível do PDF enviado.")
+        val, erro_msg = _processar_pdf_ia_cached(bytes_pdf, api_key)
+        if erro_msg:
+            st.warning(f"⚠️ {erro_msg}")
             return None
 
-        prompt = """
-        Você é a inteligência do sistema financeiro da Farmácia Jr. (UFMG). 
-        Analise o texto extraído de um PDF de orçamento de laboratório parceiro e encontre o VALOR TOTAL BRUTO do serviço.
-        Retorne ESTRITAMENTE um JSON no seguinte formato, sem formatação markdown adicional ou blocos de código:
-        {"valor_total": 0.00}
-        """
-
-        # Modelo estável que não estoura o limite de cota da API
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(
-            f"{prompt}\n\nTexto do PDF:\n{texto_completo}",
-            generation_config=genai.types.GenerationConfig(temperature=0.0),
-        )
-
-        texto_limpo = (
-            response.text.strip().replace("```json", "").replace("```", "")
-        )
-        dados_ia = json.loads(texto_limpo)
-        return float(dados_ia["valor_total"])
+        return val
 
     except Exception as e:
-        st.error(f"Erro ao processar o PDF com a IA: {e}")
+        erro_str = str(e)
+        if "429" in erro_str or "RESOURCE_EXHAUSTED" in erro_str:
+            st.warning(
+                "⏳ Cota diária/minuto do Gemini gratuita atingida. Insira o valor do laboratório manualmente no campo abaixo."
+            )
+        else:
+            st.error(f"Erro ao processar o PDF com a IA: {e}")
         return None
 
 
@@ -323,7 +339,7 @@ def renderizar_aba_precificacao():
                 prazo = quantidade * 5
 
             st.info(
-                f"📅 Prazo de execução calculado: **{prazo} dias úteis**"
+                f"📅 Prazo de execução calculated: **{prazo} dias úteis**"
             )
 
             total_cheio = valor_base * quantidade
@@ -439,21 +455,31 @@ def renderizar_aba_precificacao():
             unsafe_allow_html=True,
         )
         arquivo_pdf = st.file_uploader(
-            "Arraste o arquivo PDF do laboratório parceiro aqui:", type=["pdf"]
+            "Arraste o arquivo PDF do laboratório parceiro aqui:",
+            type=["pdf"],
+            key="file_pdf_lab",
         )
 
-        orcamento_lab = 0.0
+        val_auto_detectado = 0.0
+
         if arquivo_pdf is not None:
             with st.spinner(
                 "🤖 IA processando o PDF e extraindo o valor cobrado..."
             ):
                 valor_extraido = extrair_valor_pdf_com_ia(arquivo_pdf)
-                if valor_extraido is not None:
-                    orcamento_lab = valor_extraido
+                if valor_extraido is not None and valor_extraido > 0:
+                    val_auto_detectado = valor_extraido
                     st.success(
                         "✅ Processado com sucesso! Valor base do laboratório"
-                        f" identificado: **R$ {orcamento_lab:,.2f}**"
+                        f" identificado: **R$ {val_auto_detectado:,.2f}**"
                     )
+
+        orcamento_lab = st.number_input(
+            "Valor do Orçamento do Laboratório (R$):",
+            min_value=0.0,
+            value=float(val_auto_detectado),
+            step=50.0,
+        )
 
         col1, col2 = st.columns(2)
         with col1:
