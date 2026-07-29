@@ -140,8 +140,7 @@ if not st.session_state.logado:
                 st.error("Por favor, preencha o e-mail e a senha.")
 
 # =======================================================================
-# FLUXO DE TELA 2: TROCA DE SENHA
-# (usa a conexão cacheada em vez de abrir uma nova a cada rerun)
+# FLUXO DE TELA 2: TROCA DE SENHA OBRIGATÓRIA (PRIMEIRO ACESSO)
 # =======================================================================
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
     conn = get_connection()
