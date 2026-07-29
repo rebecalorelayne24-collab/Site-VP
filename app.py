@@ -1,7 +1,7 @@
 import os
 import sqlite3
-import hashlib
 import streamlit as st
+from werkzeug.security import check_password_hash
 
 # 1. Configuração da página (deve ser o primeiro comando Streamlit)
 st.set_page_config(
@@ -10,6 +10,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+DB_PATH = "database/financeiro_v2.db"
 
 # 2. Configuração do Gemini em cache de recurso
 @st.cache_resource
@@ -24,16 +26,12 @@ def setup_gemini():
 
 setup_gemini()
 
-# 2b. Conexão SQLite segura
-def get_connection():
-    return sqlite3.connect("database/financeiro_v2.db", check_same_thread=False)
-
-# Função de login totalmente blindada e independente de módulos externos
-def verificar_credenciais_app(email, senha):
-    conn = get_connection()
+# 3. Inicialização e blindagem do banco de dados e contas padrão
+def inicializar_banco_emergencial():
+    if not os.path.exists("database"):
+        os.makedirs("database")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
-    # Garante a criação da tabela
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,44 +41,21 @@ def verificar_credenciais_app(email, senha):
             departamento TEXT DEFAULT 'Geral',
             cargo TEXT DEFAULT 'Membro',
             foto_base64 TEXT,
-            primeiro_login INTEGER DEFAULT 0,
+            primeiro_login INTEGER DEFAULT 1,
             status TEXT DEFAULT 'Ativo'
         )
     ''')
-    
-    # Insere contas padrão caso o banco esteja vazio
-    cursor.execute('''
-        INSERT OR IGNORE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status)
-        VALUES ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 'Diretor(a)', 0, 'Ativo')
-    ''')
-    cursor.execute('''
-        INSERT OR IGNORE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status)
-        VALUES ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 'Diretor(a)', 0, 'Ativo')
-    ''')
+    # Garante as contas padrão com primeiro_login = 1 para forçar a troca de senha se necessário
+    cursor.execute("INSERT OR IGNORE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                   ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 'Diretor(a)', 1, 'Ativo'))
+    cursor.execute("INSERT OR IGNORE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                   ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 'Diretor(a)', 1, 'Ativo'))
     conn.commit()
-    
-    cursor.execute("SELECT nome, senha, primeiro_login, departamento FROM usuarios WHERE email = ?", (email,))
-    user = cursor.fetchone()
     conn.close()
 
-    if not user:
-        return {"sucesso": False, "mensagem": "E-mail não cadastrado no sistema."}
-    
-    nome, senha_db, primeiro_login, departamento = user
-    senha_hash_digitada = hashlib.sha256(senha.encode("utf-8")).hexdigest()
-    
-    # Aceita senha padrão, texto limpo ou hash SHA-256
-    if senha == "123456" or senha == senha_db or senha_hash_digitada == senha_db:
-        return {
-            "sucesso": True,
-            "nome": nome,
-            "primeiro_login": 0,  # Força 0 para evitar loops na tela de troca de senha
-            "departamento": departamento or "Geral"
-        }
-    else:
-        return {"sucesso": False, "mensagem": "Senha incorreta. Tente novamente."}
+inicializar_banco_emergencial()
 
-# 3. Estilo CSS Cacheado
+# 4. Estilo CSS Cacheado
 @st.cache_data
 def aplicar_estilo_ui():
     return """
@@ -142,17 +117,17 @@ def aplicar_estilo_ui():
 
 st.markdown(aplicar_estilo_ui(), unsafe_allow_html=True)
 
-# Inicialização rápida das variáveis de sessão
+# 5. Inicialização das variáveis de sessão
 if "logado" not in st.session_state:
     st.session_state.logado = False
 if "email_usuario" not in st.session_state:
     st.session_state.email_usuario = ""
 if "nome_usuario" not in st.session_state:
     st.session_state.nome_usuario = ""
-if "primeiro_login" not in st.session_state:
-    st.session_state.primeiro_login = 0
 if "departamento_usuario" not in st.session_state:
     st.session_state.departamento_usuario = "Geral"
+if "primeiro_login" not in st.session_state:
+    st.session_state.primeiro_login = 0
 
 # =======================================================================
 # FLUXO DE TELA 1: LOGIN
@@ -171,23 +146,47 @@ if not st.session_state.logado:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Acessar Plataforma"):
             if email_input and senha_input:
-                email_ajustado = email_input.strip().lower()
-                checagem = verificar_credenciais_app(email_ajustado, senha_input)
+                email_limpo = email_input.strip().lower()
+                
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("SELECT nome, departamento, senha, primeiro_login FROM usuarios WHERE email = ?", (email_limpo,))
+                resultado = cursor.fetchone()
+                conn.close()
 
-                if checagem["sucesso"]:
-                    st.session_state.logado = True
-                    st.session_state.email_usuario = email_ajustado
-                    st.session_state.nome_usuario = checagem["nome"]
-                    st.session_state.primeiro_login = checagem["primeiro_login"]
-                    st.session_state.departamento_usuario = checagem["departamento"]
-                    st.rerun()
+                if resultado:
+                    nome_db, depto_db, senha_db, primeiro_login_db = resultado
+                    
+                    # Compatibilidade com hash do Werkzeug e senha padrão em texto plano
+                    senha_valida = False
+                    if senha_db.startswith("scrypt:") or senha_db.startswith("pbkdf2:"):
+                        senha_valida = check_password_hash(senha_db, senha_input)
+                    else:
+                        senha_valida = (senha_db == senha_input)
+
+                    if senha_valida:
+                        st.session_state.logado = True
+                        st.session_state.email_usuario = email_limpo
+                        st.session_state.nome_usuario = nome_db
+                        st.session_state.departamento_usuario = depto_db or "Geral"
+                        st.session_state.primeiro_login = primeiro_login_db
+                        st.rerun()
+                    else:
+                        st.error("Senha incorreta. Tente novamente.")
                 else:
-                    st.error(checagem["mensagem"])
+                    st.error("E-mail não cadastrado no sistema.")
             else:
                 st.error("Por favor, preencha o e-mail e a senha.")
 
 # =======================================================================
-# FLUXO DE TELA 2: PAINEL PRINCIPAL
+# FLUXO DE TELA 2: TROCA DE SENHA OBRIGATÓRIA (PRIMEIRO ACESSO)
+# =======================================================================
+elif st.session_state.logado and st.session_state.primeiro_login == 1:
+    from modulos.telas_equipe import renderizar_tela_troca_senha
+    renderizar_tela_troca_senha(st.session_state.email_usuario)
+
+# =======================================================================
+# FLUXO DE TELA 3: PAINEL PRINCIPAL COM TODAS AS ABAS
 # =======================================================================
 else:
     st.sidebar.markdown("<h2 style='color: #FFFFFF !important;'>🦩 Setor VP</h2>", unsafe_allow_html=True)
@@ -220,7 +219,7 @@ else:
         st.session_state.departamento_usuario = "Geral"
         st.rerun()
 
-    # --- ROTEAMENTO INTELIGENTE ---
+    # --- ROTEAMENTO INTELIGENTE DAS ABAS ---
     if menu == "Dashboard Geral":
         from modulos.dashboard import renderizar_dashboard_geral
         renderizar_dashboard_geral()
