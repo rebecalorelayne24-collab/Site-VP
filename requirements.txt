@@ -1,12 +1,8 @@
 streamlit
 pandas
+plotly
 pypdf
 google-generativeai
-requests
-xlsxwriter
-reportlab
-plotly
 python-docx
-openpyxl
-weasyprint
-google-genai
+reportlab
+werkzeug
