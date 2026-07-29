@@ -65,7 +65,7 @@ def _processar_pdf_ia_cached(bytes_pdf_content, api_key):
     {"valor_total": 0.00}
     """
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
     response = model.generate_content(
         f"{prompt}\n\nTexto do PDF:\n{texto_completo}",
         generation_config=genai.types.GenerationConfig(temperature=0.0),
