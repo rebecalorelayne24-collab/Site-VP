@@ -6,8 +6,11 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import docx
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
+from docx.shared import Inches, Pt, RGBColor
 import google.generativeai as genai
 import pandas as pd
 from pypdf import PdfReader
@@ -159,8 +162,47 @@ def obter_texto_parcelamento(servico, valor_total):
         return f"à vista ({v_tot_str}) ou {num_parcelas}X de {v_parc_str}"
 
 
+def definir_borda_celula(cell, **kwargs):
+    """Aplica bordas finas customizadas nas células da tabela do Word."""
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    tcBorders = parse_xml(
+        f'<w:tcBorders {nsdecls("w")}>\n'
+        f'<w:top w:val="{kwargs.get("top", "single")}" w:sz="{kwargs.get("sz", "4")}" w:space="0" w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
+        f'<w:left w:val="{kwargs.get("left", "single")}" w:sz="{kwargs.get("sz", "4")}" w:space="0" w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
+        f'<w:bottom w:val="{kwargs.get("bottom", "single")}" w:sz="{kwargs.get("sz", "4")}" w:space="0" w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
+        f'<w:right w:val="{kwargs.get("right", "single")}" w:sz="{kwargs.get("sz", "4")}" w:space="0" w:color="{kwargs.get("color", "D3D3D3")}"/>\n'
+        f"</w:tcBorders>"
+    )
+    tcPr.append(tcBorders)
+
+
+def formatar_tabela_word(tabela, bg_cabecalho="C71585"):
+    """Aplica as cores e o estilo visual oficial da Farmácia Jr. nas tabelas."""
+    tabela.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    for i, row in enumerate(tabela.rows):
+        for cell in row.cells:
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            if i == 0:
+                # Cor de fundo do cabeçalho
+                shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{bg_cabecalho}"/>')
+                cell._tc.get_or_add_tcPr().append(shading)
+                for p in cell.paragraphs:
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    for r in p.runs:
+                        r.font.bold = True
+                        r.font.color.rgb = RGBColor(255, 255, 255)  # Texto Branco
+                        r.font.size = Pt(10)
+            else:
+                definir_borda_celula(cell)
+                for p in cell.paragraphs:
+                    for r in p.runs:
+                        r.font.size = Pt(10)
+
+
 def gerar_docx_proposta(dados):
-    """Gera o documento Word (.docx) reproduzindo fielmente o layout oficial da Farmácia Jr."""
+    """Gera o documento Word (.docx) reproduzindo fielmente o layout e cores oficiais da Farmácia Jr."""
     doc = docx.Document()
 
     # Margens padrão (2.54 cm / 1 polegada)
@@ -178,23 +220,26 @@ def gerar_docx_proposta(dados):
     agora = obter_agora_br()
     data_validade = calcular_data_final_uteis(agora, 15).strftime("%d/%m/%Y")
 
-    # 1. Validade (Topo Alinhado à Direita)
+    # 1. Validade (Topo Alinhado à Direita, tom cinza)
     p_val = doc.add_paragraph()
     p_val.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     run_val = p_val.add_run(f"Validade precificação:\n{data_validade}")
-    run_val.font.size = Pt(10)
+    run_val.font.size = Pt(9.5)
+    run_val.font.color.rgb = RGBColor(100, 100, 100)
 
-    # 2. Título do Cliente (Centralizado e em Negrito)
+    # 2. Título do Cliente (Centralizado, Negrito e em Rosa Magenta)
     p_tit = doc.add_paragraph()
     p_tit.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_tit = p_tit.add_run(f"\nPrecificação – {dados['nome_lead']}")
     run_tit.bold = True
-    run_tit.font.size = Pt(14)
+    run_tit.font.size = Pt(15)
+    run_tit.font.color.rgb = RGBColor(199, 21, 133)  # Magenta Oficial
 
     # 3. Subtítulo (Nome do Serviço)
     p_sub = doc.add_paragraph()
     run_sub = p_sub.add_run(f"{dados['nome_servico']}")
     run_sub.bold = True
+    run_sub.font.size = Pt(12)
 
     if dados["tipo_servico"] == "Serviço Autoral (Farmácia Jr.)":
         # ---------------------------------------------------------------------
@@ -203,7 +248,7 @@ def gerar_docx_proposta(dados):
         doc.add_paragraph().add_run("1° opção – Precificação cheia").bold = True
 
         tbl1 = doc.add_table(rows=2, cols=4)
-        tbl1.style = "Table Grid"
+        tbl1.autofit = False
 
         hdr1 = tbl1.rows[0].cells
         hdr1[0].text, hdr1[1].text, hdr1[2].text, hdr1[3].text = (
@@ -218,6 +263,8 @@ def gerar_docx_proposta(dados):
         row1[1].text = f"R$ {dados['valor_base']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         row1[2].text = str(dados["quantidade"])
         row1[3].text = f"R$ {dados['total_cheio']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+        formatar_tabela_word(tbl1)
 
         doc.add_paragraph(f"\nPrazo de execução: {dados['prazo']} dias úteis")
         doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_cheio']}")
@@ -241,7 +288,7 @@ def gerar_docx_proposta(dados):
                     p_item.add_run(motivo.strip())
 
         tbl2 = doc.add_table(rows=2, cols=4)
-        tbl2.style = "Table Grid"
+        tbl2.autofit = False
 
         hdr2 = tbl2.rows[0].cells
         hdr2[0].text, hdr2[1].text, hdr2[2].text, hdr2[3].text = (
@@ -257,6 +304,8 @@ def gerar_docx_proposta(dados):
         row2[2].text = str(dados["quantidade"])
         row2[3].text = f"R$ {dados['total_desconto']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
+        formatar_tabela_word(tbl2)
+
         doc.add_paragraph(f"\nPrazo de execução: {dados['prazo']} dias úteis")
         doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_desconto']}")
 
@@ -267,7 +316,7 @@ def gerar_docx_proposta(dados):
         doc.add_paragraph().add_run("1° opção – Precificação cheia").bold = True
 
         tbl3 = doc.add_table(rows=2, cols=4)
-        tbl3.style = "Table Grid"
+        tbl3.autofit = False
 
         hdr3 = tbl3.rows[0].cells
         hdr3[0].text, hdr3[1].text, hdr3[2].text, hdr3[3].text = (
@@ -282,6 +331,8 @@ def gerar_docx_proposta(dados):
         row3[1].text = f"R$ {dados['total_terceirizado']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         row3[2].text = "1"
         row3[3].text = f"R$ {dados['total_terceirizado']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+        formatar_tabela_word(tbl3)
 
         doc.add_paragraph(
             f"\nPrazo de execução: {dados['prazo_terceirizado']} dias (Incluso prazo de segurança da EJ. Previsão: {dados['data_entrega_terc']})"
