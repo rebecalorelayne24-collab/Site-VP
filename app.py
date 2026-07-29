@@ -10,23 +10,30 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
 # 2. Configuração do Gemini em cache de recurso (import + init só se houver key)
 @st.cache_resource
 def setup_gemini():
-    api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
+        "GEMINI_API_KEY"
+    )
     if not api_key:
         return False
     import google.generativeai as genai  # import pesado só roda se a key existir
+
     os.environ["GEMINI_API_KEY"] = api_key
     genai.configure(api_key=api_key)
     return True
 
+
 setup_gemini()
 
-# 2b. Conexão SQLite reutilizável (evita abrir/fechar conexão a cada rerun)
+
+# 2b. Conexão SQLite unificada e reutilizável
 @st.cache_resource
 def get_connection():
     return sqlite3.connect("database/financeiro_v2.db", check_same_thread=False)
+
 
 # 3. CSS Otimizado e Cacheado na Memória
 @st.cache_data
@@ -88,6 +95,7 @@ def aplicar_estilo_ui():
     </style>
     """
 
+
 st.markdown(aplicar_estilo_ui(), unsafe_allow_html=True)
 
 # Inicialização rápida das variáveis de sessão
@@ -114,12 +122,23 @@ if not st.session_state.logado:
     _, col2, _ = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("<h1 style='text-align: center;'>🦩 Plataforma VP</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #666;'>Farmácia Jr. — Gestão Financeira & Operacional</p>", unsafe_allow_html=True)
+        st.markdown(
+            "<h1 style='text-align: center;'>🦩 Plataforma VP</h1>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='text-align: center; color: #666;'>Farmácia Jr. — Gestão"
+            " Financeira & Operacional</p>",
+            unsafe_allow_html=True,
+        )
         st.markdown("---")
 
-        email_input = st.text_input("E-mail Institucional:", placeholder="seu-email@farmaciajr.com")
-        senha_input = st.text_input("Senha:", type="password", placeholder="••••••••")
+        email_input = st.text_input(
+            "E-mail Institucional:", placeholder="seu-email@farmaciajr.com"
+        )
+        senha_input = st.text_input(
+            "Senha:", type="password", placeholder="••••••••"
+        )
 
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Acessar Plataforma"):
@@ -132,7 +151,9 @@ if not st.session_state.logado:
                     st.session_state.email_usuario = email_ajustado
                     st.session_state.nome_usuario = checagem["nome"]
                     st.session_state.primeiro_login = checagem["primeiro_login"]
-                    st.session_state.departamento_usuario = checagem.get("departamento", "Geral")
+                    st.session_state.departamento_usuario = checagem.get(
+                        "departamento", "Geral"
+                    )
                     st.rerun()
                 else:
                     st.error(checagem["mensagem"])
@@ -145,11 +166,15 @@ if not st.session_state.logado:
 elif st.session_state.logado and st.session_state.primeiro_login == 1:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT primeiro_login FROM usuarios WHERE email = ?", (st.session_state.email_usuario,))
+    cursor.execute(
+        "SELECT primeiro_login FROM usuarios WHERE email = ?",
+        (st.session_state.email_usuario,),
+    )
     resultado = cursor.fetchone()
 
     if resultado and resultado[0] == 1:
         from modulos.telas_equipe import renderizar_tela_troca_senha
+
         renderizar_tela_troca_senha(st.session_state.email_usuario)
     else:
         st.session_state.primeiro_login = 0
@@ -159,14 +184,34 @@ elif st.session_state.logado and st.session_state.primeiro_login == 1:
 # FLUXO DE TELA 3: PAINEL PRINCIPAL (LAZY LOADING DE MÓDULOS)
 # =======================================================================
 else:
-    st.sidebar.markdown("<h2 style='color: #FFFFFF !important;'>🦩 Setor VP</h2>", unsafe_allow_html=True)
-    st.sidebar.markdown(f"<p style='color: #FFFFFF !important;'><b>Olá, {st.session_state.nome_usuario}!</b></p>", unsafe_allow_html=True)
-    st.sidebar.markdown(f"<small style='color: #FFE4E1 !important;'>Setor: {st.session_state.departamento_usuario}</small>", unsafe_allow_html=True)
-    st.sidebar.markdown("<hr style='border-color: rgba(255,255,255,0.2);'>", unsafe_allow_html=True)
+    st.sidebar.markdown(
+        "<h2 style='color: #FFFFFF !important;'>🦩 Setor VP</h2>",
+        unsafe_allow_html=True,
+    )
+    st.sidebar.markdown(
+        f"<p style='color: #FFFFFF !important;'><b>Olá,"
+        f" {st.session_state.nome_usuario}!</b></p>",
+        unsafe_allow_html=True,
+    )
+    st.sidebar.markdown(
+        f"<small style='color: #FFE4E1 !important;'>Setor:"
+        f" {st.session_state.departamento_usuario}</small>",
+        unsafe_allow_html=True,
+    )
+    st.sidebar.markdown(
+        "<hr style='border-color: rgba(255,255,255,0.2);'>",
+        unsafe_allow_html=True,
+    )
 
     opcoes_menu = ["Totem de Vendas Express", "Planejamento de Eventos"]
 
-    if st.session_state.departamento_usuario in ["VP", "Presidência"] or st.session_state.email_usuario in ["vice-presidencia@farmaciajr.com", "presidencia@farmaciajr.com"]:
+    if st.session_state.departamento_usuario in [
+        "VP",
+        "Presidência",
+    ] or st.session_state.email_usuario in [
+        "vice-presidencia@farmaciajr.com",
+        "presidencia@farmaciajr.com",
+    ]:
         opcoes_menu = [
             "Dashboard Geral",
             "Fluxo de Caixa",
@@ -180,7 +225,10 @@ else:
 
     menu = st.sidebar.radio("Navegação:", opcoes_menu)
 
-    st.sidebar.markdown("<hr style='border-color: rgba(255,255,255,0.2);'>", unsafe_allow_html=True)
+    st.sidebar.markdown(
+        "<hr style='border-color: rgba(255,255,255,0.2);'>",
+        unsafe_allow_html=True,
+    )
     if st.sidebar.button("🚪 Encerrar Sessão"):
         st.session_state.logado = False
         st.session_state.email_usuario = ""
@@ -192,32 +240,40 @@ else:
     # --- ROTEAMENTO INTELIGENTE (Importa apenas o arquivo da página ativa) ---
     if menu == "Dashboard Geral":
         from modulos.dashboard import renderizar_dashboard_geral
+
         renderizar_dashboard_geral()
 
     elif menu == "Calculadora de Precificação":
         from modulos.precificacao import renderizar_aba_precificacao
+
         renderizar_aba_precificacao()
 
     elif menu == "Fluxo de Caixa":
         from modulos.fluxo_caixa import renderizar_aba_fluxo_caixa
+
         renderizar_aba_fluxo_caixa()
 
     elif menu == "Gerenciar Equipe":
         from modulos.telas_equipe import renderizar_gerenciamento_equipe
+
         renderizar_gerenciamento_equipe(st.session_state.email_usuario)
 
     elif menu == "Planejamento de Eventos":
         from modulos.eventos_grandes import renderizar_gestao_eventos
+
         renderizar_gestao_eventos()
 
     elif menu == "Contratos e Demandas Internas":
         from modulos.gestao_interna import renderizar_gestao_interna
+
         renderizar_gestao_interna()
 
     elif menu == "Pipeline de Leads":
         from modulos.leads import renderizar_modulo_leads
+
         renderizar_modulo_leads()
 
     elif menu == "Totem de Vendas Express":
         from modulos.totem import renderizar_totem
+
         renderizar_totem()
