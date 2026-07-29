@@ -7,6 +7,11 @@ import pandas as pd
 import streamlit as st
 from werkzeug.security import check_password_hash, generate_password_hash
 
+# Mesmo banco usado por app.py, dashboard.py, fluxo_caixa.py e eventos_grandes.py.
+# (Antes este arquivo usava "financeiro_farmaciajr.db", um arquivo diferente —
+# isso fazia a tabela de usuários daqui divergir da tabela usada no login.)
+DB_PATH = "database/financeiro_v2.db"
+
 # Paleta Oficial de Cores por Diretoria da EJ
 CORES_DIRETORIAS = {
     "VP": "#FF69B4",  # Rosa
@@ -27,7 +32,7 @@ def converter_imagem_para_base64(imagem_arquivo):
 
 def inicializar_banco_equipe_expandido():
     """Garante que a tabela de usuários possua toda a estrutura de RH comercial e colunas atualizadas."""
-    conn = sqlite3.connect("database/financeiro_farmaciajr.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     cursor.execute(
@@ -108,7 +113,7 @@ def renderizar_tela_troca_senha(email_usuario):
                 st.error("As senhas digitadas não coincidem.")
             else:
                 senha_hash = generate_password_hash(nova_senha)
-                conn = sqlite3.connect("database/financeiro_farmaciajr.db")
+                conn = sqlite3.connect(DB_PATH)
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -136,7 +141,7 @@ def renderizar_gerenciamento_equipe(email_logado):
     )
 
     # 1. CARREGAMENTO DOS DADOS DA EQUIPE
-    conn = sqlite3.connect("database/financeiro_farmaciajr.db")
+    conn = sqlite3.connect(DB_PATH)
     df_users = pd.read_sql_query("SELECT * FROM usuarios", conn)
     conn.close()
 
@@ -203,10 +208,10 @@ def renderizar_gerenciamento_equipe(email_logado):
             # Exibição dos Cards Profissionais
             for _, row in df_filtrado.iterrows():
                 cor_borda = CORES_DIRETORIAS.get(row["departamento"], "#FF1493")
-                
+
                 # Indicador de Status Visual
                 status_icon = "🟢" if row["status"] == "Ativo" else ("🟡" if row["status"] == "Afastado" else "🔴")
-                
+
                 if row["foto_base64"]:
                     img_html = f"<img src='data:image/png;base64,{row['foto_base64']}' style='width:70px; height:70px; border-radius:50%; object-fit: cover; border: 2px solid {cor_borda}; margin-right: 15px;'>"
                 else:
@@ -215,7 +220,7 @@ def renderizar_gerenciamento_equipe(email_logado):
                 # Links de Redes Sociais
                 tel_clean = re.sub(r"\D", "", str(row["telefone"]))
                 link_wa = f"https://wa.me/55{tel_clean}" if len(tel_clean) >= 10 else "#"
-                
+
                 col_card, col_acao = st.columns([4, 1.2])
 
                 with col_card:
@@ -246,7 +251,7 @@ def renderizar_gerenciamento_equipe(email_logado):
                         with st.popover("🗑️ Opções", use_container_width=True):
                             st.warning(f"Ação permanente para **{row['nome']}**:")
                             if st.button("Confirmar Exclusão", key=f"conf_del_{row['id']}", type="primary", use_container_width=True):
-                                conn = sqlite3.connect("database/financeiro_farmaciajr.db")
+                                conn = sqlite3.connect(DB_PATH)
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM usuarios WHERE id = ?", (row["id"],))
                                 conn.commit()
@@ -280,7 +285,7 @@ def renderizar_gerenciamento_equipe(email_logado):
                 nova_senha_input = st.text_input("Nova Senha:", type="password")
 
                 if st.form_submit_button("💾 Salvar Alterações do Perfil"):
-                    conn = sqlite3.connect("database/financeiro_farmaciajr.db")
+                    conn = sqlite3.connect(DB_PATH)
                     cursor = conn.cursor()
 
                     # Atualiza foto se enviada
@@ -344,7 +349,7 @@ def renderizar_gerenciamento_equipe(email_logado):
                     senha_padrao_hash = generate_password_hash("farmaciajr123")
                     foto_str = converter_imagem_para_base64(foto_c)
 
-                    conn = sqlite3.connect("database/financeiro_farmaciajr.db")
+                    conn = sqlite3.connect(DB_PATH)
                     cursor = conn.cursor()
                     try:
                         cursor.execute(
