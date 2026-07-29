@@ -45,7 +45,7 @@ def calcular_data_final_uteis(data_inicial, dias_uteis):
 
 @st.cache_data(show_spinner=False)
 def _processar_pdf_ia_cached(bytes_pdf_content, api_key):
-    """Muda para o modelo estável em cache sem consumir cota em cliques repetidos do Streamlit."""
+    """Processa o PDF usando o Gemini em cache para economizar chamadas de API."""
     genai.configure(api_key=api_key)
 
     reader = PdfReader(io.BytesIO(bytes_pdf_content))
@@ -177,15 +177,15 @@ def definir_borda_celula(cell, **kwargs):
     tcPr.append(tcBorders)
 
 
-def formatar_tabela_word(tabela, bg_cabecalho="C71585"):
-    """Aplica as cores e o estilo visual oficial da Farmácia Jr. nas tabelas."""
+def formatar_tabela_word(tabela, bg_cabecalho="003366"):
+    """Aplica o fundo Azul Escuro (003366) no cabeçalho e texto branco nas tabelas."""
     tabela.alignment = WD_TABLE_ALIGNMENT.CENTER
 
     for i, row in enumerate(tabela.rows):
         for cell in row.cells:
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i == 0:
-                # Cor de fundo do cabeçalho
+                # Fundo Azul para o cabeçalho
                 shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{bg_cabecalho}"/>')
                 cell._tc.get_or_add_tcPr().append(shading)
                 for p in cell.paragraphs:
@@ -202,7 +202,7 @@ def formatar_tabela_word(tabela, bg_cabecalho="C71585"):
 
 
 def gerar_docx_proposta(dados):
-    """Gera o documento Word (.docx) reproduzindo fielmente o layout e cores oficiais da Farmácia Jr."""
+    """Gera o documento Word (.docx) com título PRETO e detalhes em AZUL."""
     doc = docx.Document()
 
     # Margens padrão (2.54 cm / 1 polegada)
@@ -220,32 +220,36 @@ def gerar_docx_proposta(dados):
     agora = obter_agora_br()
     data_validade = calcular_data_final_uteis(agora, 15).strftime("%d/%m/%Y")
 
-    # 1. Validade (Topo Alinhado à Direita, tom cinza)
+    # 1. Validade (Topo Alinhado à Direita, tom cinza discreto)
     p_val = doc.add_paragraph()
     p_val.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     run_val = p_val.add_run(f"Validade precificação:\n{data_validade}")
     run_val.font.size = Pt(9.5)
     run_val.font.color.rgb = RGBColor(100, 100, 100)
 
-    # 2. Título do Cliente (Centralizado, Negrito e em Rosa Magenta)
+    # 2. Título do Cliente (Centralizado, Negrito e em PRETO)
     p_tit = doc.add_paragraph()
     p_tit.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_tit = p_tit.add_run(f"\nPrecificação – {dados['nome_lead']}")
     run_tit.bold = True
     run_tit.font.size = Pt(15)
-    run_tit.font.color.rgb = RGBColor(199, 21, 133)  # Magenta Oficial
+    run_tit.font.color.rgb = RGBColor(0, 0, 0)  # TÍTULO EM PRETO
 
-    # 3. Subtítulo (Nome do Serviço)
+    # 3. Subtítulo (Nome do Serviço em Azul)
     p_sub = doc.add_paragraph()
     run_sub = p_sub.add_run(f"{dados['nome_servico']}")
     run_sub.bold = True
     run_sub.font.size = Pt(12)
+    run_sub.font.color.rgb = RGBColor(0, 51, 102)  # SUBTÍTULO EM AZUL
 
     if dados["tipo_servico"] == "Serviço Autoral (Farmácia Jr.)":
         # ---------------------------------------------------------------------
         # 1ª OPÇÃO - PRECIFICAÇÃO CHEIA
         # ---------------------------------------------------------------------
-        doc.add_paragraph().add_run("1° opção – Precificação cheia").bold = True
+        p_op1 = doc.add_paragraph()
+        run_op1 = p_op1.add_run("1° opção – Precificação cheia")
+        run_op1.bold = True
+        run_op1.font.color.rgb = RGBColor(0, 51, 102)  # Título de opção em Azul
 
         tbl1 = doc.add_table(rows=2, cols=4)
         tbl1.autofit = False
@@ -264,7 +268,7 @@ def gerar_docx_proposta(dados):
         row1[2].text = str(dados["quantidade"])
         row1[3].text = f"R$ {dados['total_cheio']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        formatar_tabela_word(tbl1)
+        formatar_tabela_word(tbl1, bg_cabecalho="003366")  # Cabeçalho da Tabela em Azul
 
         doc.add_paragraph(f"\nPrazo de execução: {dados['prazo']} dias úteis")
         doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_cheio']}")
@@ -274,7 +278,10 @@ def gerar_docx_proposta(dados):
         # ---------------------------------------------------------------------
         # 2ª OPÇÃO - DESCONTO DE ACORDO
         # ---------------------------------------------------------------------
-        doc.add_paragraph().add_run("2° opção – desconto de acordo").bold = True
+        p_op2 = doc.add_paragraph()
+        run_op2 = p_op2.add_run("2° opção – desconto de acordo")
+        run_op2.bold = True
+        run_op2.font.color.rgb = RGBColor(0, 51, 102)  # Título de opção em Azul
 
         # Marcadores de desconto em tópicos
         if dados.get("motivos_lista") and isinstance(dados["motivos_lista"], list):
@@ -304,7 +311,7 @@ def gerar_docx_proposta(dados):
         row2[2].text = str(dados["quantidade"])
         row2[3].text = f"R$ {dados['total_desconto']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        formatar_tabela_word(tbl2)
+        formatar_tabela_word(tbl2, bg_cabecalho="003366")  # Cabeçalho da Tabela em Azul
 
         doc.add_paragraph(f"\nPrazo de execução: {dados['prazo']} dias úteis")
         doc.add_paragraph(f"Formas de pagamento: {dados['parcelas_desconto']}")
@@ -313,7 +320,10 @@ def gerar_docx_proposta(dados):
         # ---------------------------------------------------------------------
         # TERCEIRIZADO (LABORATÓRIO)
         # ---------------------------------------------------------------------
-        doc.add_paragraph().add_run("1° opção – Precificação cheia").bold = True
+        p_op1 = doc.add_paragraph()
+        run_op1 = p_op1.add_run("1° opção – Precificação cheia")
+        run_op1.bold = True
+        run_op1.font.color.rgb = RGBColor(0, 51, 102)
 
         tbl3 = doc.add_table(rows=2, cols=4)
         tbl3.autofit = False
@@ -332,7 +342,7 @@ def gerar_docx_proposta(dados):
         row3[2].text = "1"
         row3[3].text = f"R$ {dados['total_terceirizado']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        formatar_tabela_word(tbl3)
+        formatar_tabela_word(tbl3, bg_cabecalho="003366")
 
         doc.add_paragraph(
             f"\nPrazo de execução: {dados['prazo_terceirizado']} dias (Incluso prazo de segurança da EJ. Previsão: {dados['data_entrega_terc']})"
@@ -362,8 +372,8 @@ def renderizar_aba_precificacao():
 
     st.markdown(
         """
-        <div style="background-color: #FFF0F5; padding: 15px; border-left: 5px solid #FF69B4; border-radius: 4px; margin-bottom: 20px;">
-            <span style="color: #FF1493; font-weight: bold;">⚠️ DIRETRIZ INTERNA DA VICE-PRESIDÊNCIA:</span><br>
+        <div style="background-color: #F0F8FF; padding: 15px; border-left: 5px solid #003366; border-radius: 4px; margin-bottom: 20px;">
+            <span style="color: #003366; font-weight: bold;">⚠️ DIRETRIZ INTERNA DA VICE-PRESIDÊNCIA:</span><br>
             O prazo de entrega de uma precificação de um <b>serviço autoral</b> para negócios é de no máximo <b>2 dias úteis</b>.<br>
             Já em caso de <b>serviço laboratorial (terceirizado)</b> não podemos exceder o prazo máximo de <b>5 dias úteis</b> para envio ao lead.
         </div>
@@ -411,7 +421,7 @@ def renderizar_aba_precificacao():
                 prazo = quantidade * 5
 
             st.info(
-                f"📅 Prazo de execução calculado: **{prazo} dias úteis**"
+                f"📅 Prazo de execução calculated: **{prazo} dias úteis**"
             )
 
             total_cheio = valor_base * quantidade
@@ -425,7 +435,7 @@ def renderizar_aba_precificacao():
         )
 
         st.markdown(
-            "<h4 style='color: #FF1493;'>🔍 Seleção de Descontos (Limite Máximo de 15%)</h4>",
+            "<h4 style='color: #003366;'>🔍 Seleção de Descontos (Limite Máximo de 15%)</h4>",
             unsafe_allow_html=True,
         )
 
@@ -484,7 +494,7 @@ def renderizar_aba_precificacao():
 
         st.markdown(
             f"**Soma dos descontos:** {soma_descontos:.2f}% | **Desconto real"
-            " aplicado (Limite de 15%):** <span style='color:#FF1493;"
+            " aplicado (Limite de 15%):** <span style='color:#003366;"
             f" font-weight:bold;'>{desconto_final_pct:.2f}%</span>",
             unsafe_allow_html=True,
         )
@@ -522,7 +532,7 @@ def renderizar_aba_precificacao():
     else:
         # --- CENÁRIO TERCEIRIZADO ---
         st.markdown(
-            "<h4 style='color: #FF1493;'>📂 Upload do Orçamento do Laboratório</h4>",
+            "<h4 style='color: #003366;'>📂 Upload do Orçamento do Laboratório</h4>",
             unsafe_allow_html=True,
         )
         arquivo_pdf = st.file_uploader(
