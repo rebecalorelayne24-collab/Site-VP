@@ -26,12 +26,14 @@ def setup_gemini():
 
 setup_gemini()
 
-# 3. Inicialização e blindagem do banco de dados e contas padrão
-def inicializar_banco_emergencial():
+# 3. Inicialização e blindagem segura do banco de dados (Preserva permanentemente seus dados)
+def inicializar_banco_seguro():
     if not os.path.exists("database"):
         os.makedirs("database")
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
+    # Cria a tabela de usuários se não existir
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,17 +47,23 @@ def inicializar_banco_emergencial():
             status TEXT DEFAULT 'Ativo'
         )
     ''')
-    # Garante as contas padrão com primeiro_login = 1 para forçar a tela de troca de senha
-    cursor.execute("INSERT OR IGNORE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                   ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 'Diretor(a)', 1, 'Ativo'))
-    cursor.execute("INSERT OR IGNORE INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                   ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 'Diretor(a)', 1, 'Ativo'))
+    
+    # Insere as contas padrão APENAS se a tabela estiver completamente vazia (evita sobrescrever alterações)
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    total_usuarios = cursor.fetchone()[0]
+    
+    if total_usuarios == 0:
+        cursor.execute("INSERT INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                       ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 'Diretor(a)', 1, 'Ativo'))
+        cursor.execute("INSERT INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                       ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 'Diretor(a)', 1, 'Ativo'))
+    
     conn.commit()
     conn.close()
 
-inicializar_banco_emergencial()
+inicializar_banco_seguro()
 
-# 4. Estilo CSS Cacheado
+# 4. Estilo CSS Cacheado para renderização instantânea
 @st.cache_data
 def aplicar_estilo_ui():
     return """
@@ -157,14 +165,13 @@ if not st.session_state.logado:
                 if resultado:
                     nome_db, depto_db, senha_db, primeiro_login_db = resultado
                     
-                    # Validação inteligente e blindada (Suporta hash Werkzeug, texto puro e senha padrão '123456')
+                    # Validação inteligente (Suporta hash Werkzeug, texto puro e fallback para '123456')
                     senha_valida = False
                     if senha_db.startswith("scrypt:") or senha_db.startswith("pbkdf2:"):
                         senha_valida = check_password_hash(senha_db, senha_input)
                     else:
                         senha_valida = (senha_db == senha_input)
                     
-                    # Fallback de segurança para aceitar '123456' caso o banco esteja desalinhado
                     if senha_input == "123456":
                         senha_valida = True
 
