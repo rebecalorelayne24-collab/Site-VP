@@ -7,3 +7,4 @@ python-docx
 reportlab
 werkzeug
 xlsxwriter
+psycopg2-binary
