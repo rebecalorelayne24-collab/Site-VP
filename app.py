@@ -1,7 +1,7 @@
 import os
-import sqlite3
 import streamlit as st
 from werkzeug.security import check_password_hash
+from database.conexao_db import get_connection
 
 # 1. Configuração da página (deve ser o primeiro comando Streamlit)
 st.set_page_config(
@@ -10,8 +10,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-DB_PATH = "database/financeiro_v2.db"
 
 # 2. Configuração do Gemini em cache de recurso
 @st.cache_resource
@@ -26,42 +24,10 @@ def setup_gemini():
 
 setup_gemini()
 
-# 3. Inicialização e blindagem segura do banco de dados (Preserva permanentemente seus dados)
-def inicializar_banco_seguro():
-    if not os.path.exists("database"):
-        os.makedirs("database")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Cria a tabela de usuários se não existir
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            senha TEXT NOT NULL,
-            nome TEXT NOT NULL,
-            departamento TEXT DEFAULT 'Geral',
-            cargo TEXT DEFAULT 'Membro',
-            foto_base64 TEXT,
-            primeiro_login INTEGER DEFAULT 1,
-            status TEXT DEFAULT 'Ativo'
-        )
-    ''')
-    
-    # Insere as contas padrão APENAS se a tabela estiver completamente vazia (evita sobrescrever alterações)
-    cursor.execute("SELECT COUNT(*) FROM usuarios")
-    total_usuarios = cursor.fetchone()[0]
-    
-    if total_usuarios == 0:
-        cursor.execute("INSERT INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                       ('vice-presidencia@farmaciajr.com', '123456', 'Vice-Presidência', 'VP', 'Diretor(a)', 1, 'Ativo'))
-        cursor.execute("INSERT INTO usuarios (email, senha, nome, departamento, cargo, primeiro_login, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                       ('presidencia@farmaciajr.com', '123456', 'Presidência', 'Presidência', 'Diretor(a)', 1, 'Ativo'))
-    
-    conn.commit()
-    conn.close()
-
-inicializar_banco_seguro()
+# 3. Banco de dados: agora é o Postgres do Supabase (persistente).
+# As tabelas e as contas padrão de diretoria já são criadas uma única
+# vez via schema.sql direto no Supabase — não é mais necessário (nem
+# seguro) recriar tabelas a cada carregamento do app.
 
 # 4. Estilo CSS Cacheado para renderização instantânea
 @st.cache_data
@@ -156,7 +122,7 @@ if not st.session_state.logado:
             if email_input and senha_input:
                 email_limpo = email_input.strip().lower()
                 
-                conn = sqlite3.connect(DB_PATH)
+                conn = get_connection()
                 cursor = conn.cursor()
                 cursor.execute("SELECT nome, departamento, senha, primeiro_login FROM usuarios WHERE email = ?", (email_limpo,))
                 resultado = cursor.fetchone()
