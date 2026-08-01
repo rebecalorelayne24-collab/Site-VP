@@ -1,7 +1,5 @@
 import io
 import json
-import os
-import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -9,70 +7,14 @@ import google.generativeai as genai
 import pandas as pd
 from pypdf import PdfReader
 import streamlit as st
+from database.conexao_db import get_connection
 
-DB_PATH = "database/financeiro_v2.db"
 FUSO_BR = ZoneInfo("America/Sao_Paulo")
 
 
 def obter_agora_br():
     """Retorna o datetime atual no fuso horário oficial de Brasília."""
     return datetime.now(FUSO_BR)
-
-
-def garantir_colunas_documentacao():
-    """Garante a existência da tabela e adiciona colunas faltantes dinamicamente."""
-    if not os.path.exists("database"):
-        os.makedirs("database")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mes TEXT,
-            data TEXT,
-            departamento TEXT,
-            tipo TEXT,
-            categoria TEXT,
-            descricao TEXT,
-            valor_bruto REAL,
-            taxa REAL,
-            valor_liquido REAL,
-            conta_origem TEXT,
-            status_pagamento TEXT,
-            nota_fiscal TEXT,
-            status_onvio TEXT
-        )
-    """)
-
-    cursor.execute("PRAGMA table_info(fluxo_caixa_geral)")
-    colunas_existentes = [coluna[1] for coluna in cursor.fetchall()]
-
-    colunas_necessarias = {
-        "mes": "TEXT",
-        "data": "TEXT",
-        "departamento": "TEXT",
-        "tipo": "TEXT",
-        "categoria": "TEXT",
-        "descricao": "TEXT",
-        "valor_bruto": "REAL",
-        "taxa": "REAL",
-        "valor_liquido": "REAL",
-        "conta_origem": "TEXT",
-        "status_pagamento": "TEXT",
-        "nota_fiscal": "TEXT",
-        "status_onvio": "TEXT",
-    }
-
-    for coluna, tipo_dado in colunas_necessarias.items():
-        if coluna not in colunas_existentes:
-            cursor.execute(
-                f"ALTER TABLE fluxo_caixa_geral ADD COLUMN {coluna} {tipo_dado}"
-            )
-
-    conn.commit()
-    conn.close()
 
 
 def obter_lista_bancos(df):
@@ -90,8 +32,7 @@ def obter_lista_bancos(df):
 def salvar_lancamento(
     mes, data, depto, tipo, cat, desc, v_bruto, v_taxa, v_liq, conta, pagamento, nf, onvio
 ):
-    garantir_colunas_documentacao()
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -111,8 +52,7 @@ def salvar_lancamentos_em_lote(lista_lancamentos):
     if not lista_lancamentos:
         return
 
-    garantir_colunas_documentacao()
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
 
     dados_tuple = [
@@ -525,7 +465,6 @@ def gerar_excel_estilizado(df_export):
 
 
 def renderizar_aba_fluxo_caixa():
-    garantir_colunas_documentacao()
 
     st.markdown(
         "<h2 style='text-align: center; color: #C71585;'>📊 Fluxo de Caixa Geral — Farmácia Jr.</h2>",
@@ -538,7 +477,7 @@ def renderizar_aba_fluxo_caixa():
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
     ]
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     df = pd.read_sql_query("SELECT * FROM fluxo_caixa_geral ORDER BY data DESC, id DESC", conn)
     conn.close()
 
@@ -741,7 +680,7 @@ def renderizar_aba_fluxo_caixa():
                 col_l3.caption(f"Status: {row['status_pagamento']} | NF: {row['nota_fiscal']}")
 
                 if col_l4.button("🗑️", key=f"del_fluxo_{row['id']}", help="Excluir lançamento"):
-                    conn = sqlite3.connect(DB_PATH)
+                    conn = get_connection()
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM fluxo_caixa_geral WHERE id = ?", (row["id"],))
                     conn.commit()
