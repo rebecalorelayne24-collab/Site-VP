@@ -1,8 +1,8 @@
-import sqlite3
 import hashlib
+from database.conexao_db import get_connection
 
 def verificar_credenciais(email, senha):
-    conn = sqlite3.connect("database/financeiro_v2.db")
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT nome, senha, primeiro_login, departamento FROM usuarios WHERE email = ?", (email,))
     user = cursor.fetchone()
