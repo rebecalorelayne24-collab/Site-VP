@@ -1,92 +1,11 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import io
-import os
 from datetime import datetime
 from modulos.fluxo_caixa import salvar_lancamento
-
-def garantir_tabelas_totem():
-    """Garante que a pasta database e as tabelas operacionais do balcão existam no banco"""
-    os.makedirs('database', exist_ok=True)
-    conn = None
-    try:
-        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
-        cursor = conn.cursor()
-        
-        # Tabela de Fluxo de Caixa Próprio do Balcão
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS caixa_balcao (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                data_hora TEXT,
-                tipo_servico TEXT,
-                descricao TEXT,
-                cliente TEXT,
-                valor REAL,
-                diretoria TEXT,
-                status_pagamento TEXT
-            )
-        ''')
-        
-        # Tabela de Controle de Empréstimo de Jalecos
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS emprestimos_jaleco (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                data_hora TEXT,
-                cliente_nome TEXT,
-                cliente_telefone TEXT,
-                membro_responsavel TEXT,
-                status_pagamento TEXT,
-                status_devolucao TEXT DEFAULT '🟡 Com o Aluno'
-            )
-        ''')
-        
-        # Tabela de Histórico de Vendas do DDA (Açaí/Sundae)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS vendas_dda (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                data_hora TEXT,
-                produto TEXT,
-                cliente_nome TEXT,
-                valor REAL,
-                diretoria TEXT
-            )
-        ''')
-        
-        # Tabela de Vendas de Souvenirs
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS vendas_souvenirs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                data_hora TEXT,
-                item TEXT,
-                cliente_nome TEXT,
-                valor REAL,
-                diretoria TEXT
-            )
-        ''')
-        
-        # Tabela de Impressões e Xerox
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS registro_impressoes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                data_hora TEXT,
-                cliente_nome TEXT,
-                paginas INTEGER,
-                valor REAL,
-                diretoria TEXT
-            )
-        ''')
-        
-        conn.commit()
-    except Exception as e:
-        st.error(f"Erro ao inicializar o banco de dados do Totem: {e}")
-    finally:
-        if conn:
-            conn.close()
+from database.conexao_db import get_connection
 
 def renderizar_totem():
-    garantir_tabelas_totem()
-    
     st.markdown("<h2 style='text-align: center; color: #FF1493;'>🍦 Central de Sincronização & Caixa do Balcão</h2>", unsafe_allow_html=True)
     st.caption("Gerenciamento isolado das receitas de balcão (Açaí, Jalecos, Souvenirs e Impressões) e sincronização com o sistema geral.")
 
@@ -109,7 +28,7 @@ def renderizar_totem():
         st.caption("Visão detalhada de todas as movimentações financeiras geradas exclusivamente pelas operações de balcão.")
 
         try:
-            conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+            conn = get_connection()
             df_caixa_balcao = pd.read_sql_query("SELECT * FROM caixa_balcao ORDER BY id DESC", conn)
             conn.close()
         except Exception:
@@ -134,7 +53,7 @@ def renderizar_totem():
                     col_b3.write(f"💸 **R$ {row['valor']:.2f}**\n\nStatus: {row['status_pagamento']}")
                     
                     if col_b4.button("🗑️", key=f"del_caixa_b_{row['id']}", help="Excluir lançamento do balcão"):
-                        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM caixa_balcao WHERE id = ?", (row['id'],))
                         conn.commit()
@@ -168,7 +87,7 @@ def renderizar_totem():
                     mes_atual = lista_meses[hoje.month - 1]
                     data_str = hoje.strftime("%Y-%m-%d")
 
-                    conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+                    conn = get_connection()
                     cursor = conn.cursor()
 
                     for _, line in df_vendas.iterrows():
@@ -257,7 +176,7 @@ def renderizar_totem():
     with tab_dda:
         st.markdown("### 🍧 Painel de Vendas — DDA (Dia do Açaí)")
         try:
-            conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+            conn = get_connection()
             df_dda = pd.read_sql_query("SELECT * FROM vendas_dda ORDER BY id DESC", conn)
             conn.close()
         except Exception:
@@ -288,7 +207,7 @@ def renderizar_totem():
     with tab_jalecos:
         st.markdown("### 🥼 Histórico de Jalecos em Circulação")
         try:
-            conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+            conn = get_connection()
             df_j = pd.read_sql_query("SELECT * FROM emprestimos_jaleco WHERE status_devolucao = '🟡 Com o Aluno' ORDER BY id DESC", conn)
             conn.close()
         except Exception:
@@ -308,7 +227,7 @@ def renderizar_totem():
                     """, unsafe_allow_html=True)
 
                     if st.button(f"📥 Confirmar Devolução do Jaleco #{row['id']}", key=f"bx_dev_jaleco_{row['id']}", use_container_width=True):
-                        conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute("UPDATE emprestimos_jaleco SET status_devolucao = '🟢 Devolvido' WHERE id = ?", (row['id'],))
                         conn.commit()
@@ -322,7 +241,7 @@ def renderizar_totem():
     with tab_souvenirs:
         st.markdown("### 🛍️ Painel de Vendas de Souvenirs")
         try:
-            conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+            conn = get_connection()
             df_s = pd.read_sql_query("SELECT * FROM vendas_souvenirs ORDER BY id DESC", conn)
             conn.close()
         except Exception:
@@ -352,7 +271,7 @@ def renderizar_totem():
     with tab_impressoes:
         st.markdown("### 🖨️ Painel de Serviços de Impressão e Xerox")
         try:
-            conn = sqlite3.connect('database/financeiro_farmaciajr.db')
+            conn = get_connection()
             df_imp = pd.read_sql_query("SELECT * FROM registro_impressoes ORDER BY id DESC", conn)
             conn.close()
         except Exception:
