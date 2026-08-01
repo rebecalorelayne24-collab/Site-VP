@@ -1,60 +1,14 @@
-import os
-import sqlite3
 import pandas as pd
 import streamlit as st
-
-DB_PATH = "database/financeiro_v2.db"
+from database.conexao_db import get_connection
 
 
 def conectar_banco_eventos():
-    """Garante a existência do diretório e das tabelas necessárias no SQLite."""
-    if not os.path.exists("database"):
-        os.makedirs("database")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Tabela de planejamento de eventos
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS planejamento_eventos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            evento TEXT,
-            responsavel TEXT,
-            departamento TEXT,
-            tipo_registro TEXT,
-            prioridade TEXT,
-            item TEXT,
-            valor REAL,
-            status_compra TEXT
-        )
-    """)
-
-    # Tabela de fluxo de caixa geral (garante que pesquisas cruzadas não quebrem)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mes TEXT,
-            data TEXT,
-            departamento TEXT,
-            tipo TEXT,
-            categoria TEXT,
-            descricao TEXT,
-            valor_bruto REAL,
-            taxa REAL,
-            valor_liquido REAL,
-            conta_origem TEXT,
-            status_pagamento TEXT,
-            nota_fiscal TEXT,
-            status_onvio TEXT
-        )
-    """)
-
-    conn.commit()
-    return conn
+    """Devolve uma conexão com o banco (Postgres/Supabase, já com as tabelas criadas)."""
+    return get_connection()
 
 
 def renderizar_pagina_planejamento_eventos():
-    conectar_banco_eventos()
     lista_depto = ["IMAGEM", "AR", "VP", "PRESIDÊNCIA", "PROJETOS", "NEGÓCIOS"]
 
     st.title("🏆 Central de Planejamento de Eventos (VP)")
