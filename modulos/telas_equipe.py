@@ -2,12 +2,11 @@ import base64
 from datetime import datetime
 import io
 import re
-import sqlite3
 import pandas as pd
+import psycopg2
 import streamlit as st
 from werkzeug.security import check_password_hash, generate_password_hash
-
-DB_PATH = "database/financeiro_v2.db"
+from database.conexao_db import get_connection
 
 CORES_DIRETORIAS = {
     "VP": "#FF69B4",
@@ -23,62 +22,6 @@ def converter_imagem_para_base64(imagem_arquivo):
     if imagem_arquivo is not None:
         return base64.b64encode(imagem_arquivo.read()).decode("utf-8")
     return ""
-
-
-def inicializar_banco_equipe_expandido():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            senha TEXT NOT NULL,
-            departamento TEXT NOT NULL,
-            primeiro_login INTEGER DEFAULT 1,
-            cargo TEXT DEFAULT 'Assessor(a)',
-            foto_base64 TEXT DEFAULT '',
-            telefone TEXT DEFAULT '',
-            linkedin TEXT DEFAULT '',
-            instagram TEXT DEFAULT '',
-            data_entrada TEXT DEFAULT '',
-            data_nascimento TEXT DEFAULT '',
-            status TEXT DEFAULT 'Ativo',
-            ultimo_login TEXT DEFAULT '',
-            permissoes TEXT DEFAULT 'Membro',
-            matricula TEXT DEFAULT ''
-        )
-    """
-    )
-
-    cursor.execute("PRAGMA table_info(usuarios)")
-    colunas_existentes = [coluna[1] for coluna in cursor.fetchall()]
-
-    colunas_novas = {
-        "cargo": "TEXT DEFAULT 'Assessor(a)'",
-        "foto_base64": "TEXT DEFAULT ''",
-        "telefone": "TEXT DEFAULT ''",
-        "linkedin": "TEXT DEFAULT ''",
-        "instagram": "TEXT DEFAULT ''",
-        "data_entrada": "TEXT DEFAULT ''",
-        "data_nascimento": "TEXT DEFAULT ''",
-        "status": "TEXT DEFAULT 'Ativo'",
-        "ultimo_login": "TEXT DEFAULT ''",
-        "permissoes": "TEXT DEFAULT 'Membro'",
-        "matricula": "TEXT DEFAULT ''",
-    }
-
-    for col, def_type in colunas_novas.items():
-        if col not in colunas_existentes:
-            try:
-                cursor.execute(f"ALTER TABLE usuarios ADD COLUMN {col} {def_type}")
-            except sqlite3.OperationalError:
-                pass
-
-    conn.commit()
-    conn.close()
 
 
 def renderizar_tela_troca_senha(email_usuario):
@@ -100,7 +43,7 @@ def renderizar_tela_troca_senha(email_usuario):
                 st.error("As senhas digitadas não coincidem.")
             else:
                 senha_hash = generate_password_hash(nova_senha)
-                conn = sqlite3.connect(DB_PATH)
+                conn = get_connection()
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -119,14 +62,13 @@ def renderizar_tela_troca_senha(email_usuario):
 
 
 def renderizar_gerenciamento_equipe(email_logado):
-    inicializar_banco_equipe_expandido()
 
     st.markdown(
         "<h2 style='color: #FF1493;'>👥 Gestão de Pessoas & RH – Farmácia Jr.</h2>",
         unsafe_allow_html=True,
     )
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     df_users = pd.read_sql_query("SELECT * FROM usuarios", conn)
     conn.close()
 
@@ -213,7 +155,7 @@ def renderizar_gerenciamento_equipe(email_logado):
                         with st.popover("🗑️ Opções", use_container_width=True):
                             st.warning(f"Ação permanente para **{row['nome']}**:")
                             if st.button("Confirmar Exclusão", key=f"conf_del_{row['id']}", type="primary", use_container_width=True):
-                                conn = sqlite3.connect(DB_PATH)
+                                conn = get_connection()
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM usuarios WHERE id = ?", (row["id"],))
                                 conn.commit()
@@ -244,7 +186,7 @@ def renderizar_gerenciamento_equipe(email_logado):
                 nova_senha_input = st.text_input("Nova Senha:", type="password")
 
                 if st.form_submit_button("💾 Salvar Alterações do Perfil"):
-                    conn = sqlite3.connect(DB_PATH)
+                    conn = get_connection()
                     cursor = conn.cursor()
 
                     foto_str = dados_eu["foto_base64"]
@@ -302,7 +244,7 @@ def renderizar_gerenciamento_equipe(email_logado):
                     senha_padrao_hash = generate_password_hash("farmaciajr123")
                     foto_str = converter_imagem_para_base64(foto_c)
 
-                    conn = sqlite3.connect(DB_PATH)
+                    conn = get_connection()
                     cursor = conn.cursor()
                     try:
                         cursor.execute(
@@ -331,7 +273,7 @@ def renderizar_gerenciamento_equipe(email_logado):
                         conn.commit()
                         st.success(f"Membro **{nome_c}** cadastrado(a) com sucesso! A senha inicial padrão é 'farmaciajr123'.")
                         st.rerun()
-                    except sqlite3.IntegrityError:
+                    except psycopg2.IntegrityError:
                         st.error("Este e-mail já está cadastrado no banco da EJ.")
                     finally:
                         conn.close()
