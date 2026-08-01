@@ -1,5 +1,3 @@
-import os
-import sqlite3
 import urllib.parse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -9,75 +7,14 @@ import plotly.express as px
 import streamlit as st
 
 from modulos.fluxo_caixa import salvar_lancamento
+from database.conexao_db import get_connection
 
-DB_PATH = "database/financeiro_v2.db"
 FUSO_BR = ZoneInfo("America/Sao_Paulo")
 
 
 def obter_agora_br():
     """Retorna o datetime atual no fuso horário oficial de Brasília."""
     return datetime.now(FUSO_BR)
-
-
-def inicializar_banco_gestao():
-    """Garante a existência do diretório e de todas as tabelas no SQLite."""
-    if not os.path.exists("database"):
-        os.makedirs("database")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Tabela de Contratos
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS contratos_ej (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente TEXT,
-            projeto TEXT,
-            valor_total REAL,
-            parcelas_totais INTEGER,
-            parcelas_pagas INTEGER,
-            vencimento TEXT,
-            link_drive TEXT,
-            status_boleto TEXT
-        )
-    """)
-
-    # Tabela de Tarefas dos Assessores
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tarefas_assessores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tarefa TEXT,
-            assessor_nome TEXT,
-            diretoria TEXT,
-            prazo TEXT,
-            status TEXT
-        )
-    """)
-
-    # Tabela de Usuários / Membros (evita o erro do Pandas ao buscar assessores)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT UNIQUE NOT NULL,
-            email TEXT,
-            departamento TEXT,
-            cargo TEXT DEFAULT 'Membro'
-        )
-    """)
-
-    # Tabela de Fluxo de Caixa Geral (garante que buscas não falhem)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mes TEXT, data TEXT, departamento TEXT, tipo TEXT,
-            categoria TEXT, descricao TEXT, valor_bruto REAL, taxa REAL,
-            valor_liquido REAL, conta_origem TEXT, status_pagamento TEXT,
-            nota_fiscal TEXT, status_onvio TEXT
-        )
-    """)
-
-    conn.commit()
-    conn.close()
 
 
 def converter_data_segura(str_data):
@@ -93,7 +30,6 @@ def converter_data_segura(str_data):
 
 
 def renderizar_gestao_interna():
-    inicializar_banco_gestao()
     lista_meses = [
         "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
@@ -115,7 +51,7 @@ def renderizar_gestao_interna():
     # =======================================================================
     with tab_contratos:
         st.markdown("### 📜 Gestão de Contratos e Inteligência de Recebíveis")
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_connection()
         df_con = pd.read_sql_query("SELECT * FROM contratos_ej ORDER BY id DESC", conn)
         conn.close()
 
@@ -196,7 +132,7 @@ def renderizar_gestao_interna():
                             if parc_p >= parc_t
                             else "🟡 Aguardando Compensação"
                         )
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             """
@@ -264,7 +200,7 @@ def renderizar_gestao_interna():
                             else "🟡 Aguardando Compensação"
                         )
 
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             "UPDATE contratos_ej SET parcelas_pagas = ?,"
@@ -294,7 +230,7 @@ def renderizar_gestao_interna():
                         st.rerun()
 
                 if col_b3.button("🗑️ Deletar", key=f"dl_cn_{row['id']}", use_container_width=True):
-                    conn = sqlite3.connect(DB_PATH)
+                    conn = get_connection()
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM contratos_ej WHERE id = ?", (row["id"],))
                     conn.commit()
@@ -309,7 +245,7 @@ def renderizar_gestao_interna():
         st.markdown("### 📋 Painel Didático de Distribuição de Demandas")
 
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_connection()
             df_membros = pd.read_sql_query("SELECT nome FROM usuarios ORDER BY nome ASC", conn)
             conn.close()
             lista_nomes_membros = (
@@ -332,7 +268,7 @@ def renderizar_gestao_interna():
 
                 if st.form_submit_button("🚀 Enviar para o Painel"):
                     if tar and ass_selecionado != "Nenhum membro cadastrado":
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             """
@@ -347,7 +283,7 @@ def renderizar_gestao_interna():
                         st.rerun()
 
         # Carrega tarefas do banco
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_connection()
         df_tar = pd.read_sql_query("SELECT * FROM tarefas_assessores", conn)
         conn.close()
 
@@ -401,7 +337,7 @@ def renderizar_gestao_interna():
                     if c_btn1.button(
                         "⏩ Iniciar", key=f"st_{r['id']}", use_container_width=True
                     ):
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             "UPDATE tarefas_assessores SET status = '🔵"
@@ -439,7 +375,7 @@ def renderizar_gestao_interna():
                     if st.button(
                         "✅ Concluir", key=f"dn_{r['id']}", use_container_width=True
                     ):
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             "UPDATE tarefas_assessores SET status = '🟢"
@@ -472,7 +408,7 @@ def renderizar_gestao_interna():
                     if st.button(
                         "🗑️ Limpar", key=f"cl_{r['id']}", use_container_width=True
                     ):
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             "DELETE FROM tarefas_assessores WHERE id = ?",
