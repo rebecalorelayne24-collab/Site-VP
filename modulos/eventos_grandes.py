@@ -1,110 +1,21 @@
 import io
-import os
-import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
+import psycopg2
 import streamlit as st
 
 from modulos.fluxo_caixa import salvar_lancamento
+from database.conexao_db import get_connection
 
-DB_PATH = "database/financeiro_v2.db"
 FUSO_BR = ZoneInfo("America/Sao_Paulo")
 
 
 def obter_agora_br():
     """Retorna o datetime atual no fuso horário de Brasília."""
     return datetime.now(FUSO_BR)
-
-
-def inicializar_banco_eventos():
-    """Garante a existência do diretório e de todas as tabelas necessárias no SQLite."""
-    if not os.path.exists("database"):
-        os.makedirs("database")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cadastro_eventos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT UNIQUE NOT NULL
-        )
-    """)
-
-    cursor.execute("SELECT COUNT(*) FROM cadastro_eventos")
-    if cursor.fetchone()[0] == 0:
-        eventos_padrao = [
-            ("DDA (Dia do Açaí)",),
-            ("SIMCOM (Simpósio de Cosméticos)",),
-            ("JOFARM (Jornada Farmacêutica)",),
-            ("SEFARM (Simpósio de Farmácia)",),
-        ]
-        cursor.executemany(
-            "INSERT INTO cadastro_eventos (nome) VALUES (?)", eventos_padrao
-        )
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS custos_eventos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            evento TEXT,
-            item TEXT,
-            valor REAL,
-            data TEXT,
-            status TEXT DEFAULT '🟢 Pago'
-        )
-    """)
-
-    cursor.execute("PRAGMA table_info(custos_eventos)")
-    colunas_custos = [col[1] for col in cursor.fetchall()]
-    if "status" not in colunas_custos:
-        cursor.execute(
-            "ALTER TABLE custos_eventos ADD COLUMN status TEXT DEFAULT '🟢 Pago'"
-        )
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS patrocinios_eventos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            evento TEXT,
-            empresa TEXT,
-            valor REAL,
-            data TEXT
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS sympla_consolidado (
-            evento TEXT PRIMARY KEY,
-            ingressos_vendidos INTEGER,
-            faturamento_bruto REAL,
-            taxa_porcentagem REAL,
-            meta_ingressos INTEGER
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mes TEXT,
-            data TEXT,
-            departamento TEXT,
-            tipo TEXT,
-            categoria TEXT,
-            descricao TEXT,
-            valor_bruto REAL,
-            taxa REAL,
-            valor_liquido REAL,
-            conta_origem TEXT,
-            status_pagamento TEXT,
-            nota_fiscal TEXT,
-            status_onvio TEXT
-        )
-    """)
-
-    conn.commit()
-    conn.close()
 
 
 def obter_cor_evento(evento_nome):
@@ -375,7 +286,6 @@ def gerar_excel_didatico(
 
 
 def renderizar_gestao_eventos():
-    inicializar_banco_eventos()
 
     st.markdown(
         "<h2 style='text-align: center; color: #FF1493;'>🔬 Planejamento"
@@ -388,7 +298,7 @@ def renderizar_gestao_eventos():
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
     ]
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     df_lista_ev = pd.read_sql_query(
         "SELECT nome FROM cadastro_eventos ORDER BY id ASC", conn
     )
@@ -411,7 +321,7 @@ def renderizar_gestao_eventos():
             if st.button("Cadastrar Evento"):
                 if novo_nome_ev:
                     try:
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             "INSERT INTO cadastro_eventos (nome) VALUES (?)",
@@ -421,7 +331,7 @@ def renderizar_gestao_eventos():
                         conn.close()
                         st.success(f"Evento {novo_nome_ev} criado com sucesso!")
                         st.rerun()
-                    except sqlite3.IntegrityError:
+                    except psycopg2.IntegrityError:
                         st.error("Este evento já está cadastrado.")
                 else:
                     st.warning("Digite um nome válido.")
@@ -430,7 +340,7 @@ def renderizar_gestao_eventos():
         is_dda = "DDA" in evento_selecionado
         tag_evento = evento_selecionado.split(" ")[0]
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_connection()
         df_sympla = pd.read_sql_query(
             "SELECT * FROM sympla_consolidado WHERE evento = ?",
             conn,
@@ -659,12 +569,17 @@ def renderizar_gestao_eventos():
                         value=int(meta_ing),
                     )
                     if st.form_submit_button("Atualizar Meta do DDA"):
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             """
-                            INSERT OR REPLACE INTO sympla_consolidado (evento, ingressos_vendidos, faturamento_bruto, taxa_porcentagem, meta_ingressos)
+                            INSERT INTO sympla_consolidado (evento, ingressos_vendidos, faturamento_bruto, taxa_porcentagem, meta_ingressos)
                             VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT (evento) DO UPDATE SET
+                                ingressos_vendidos = EXCLUDED.ingressos_vendidos,
+                                faturamento_bruto = EXCLUDED.faturamento_bruto,
+                                taxa_porcentagem = EXCLUDED.taxa_porcentagem,
+                                meta_ingressos = EXCLUDED.meta_ingressos
                         """,
                             (
                                 evento_selecionado,
@@ -706,12 +621,17 @@ def renderizar_gestao_eventos():
                     )
 
                     if st.form_submit_button("Guardar Configuração Sympla"):
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             """
-                            INSERT OR REPLACE INTO sympla_consolidado (evento, ingressos_vendidos, faturamento_bruto, taxa_porcentagem, meta_ingressos)
+                            INSERT INTO sympla_consolidado (evento, ingressos_vendidos, faturamento_bruto, taxa_porcentagem, meta_ingressos)
                             VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT (evento) DO UPDATE SET
+                                ingressos_vendidos = EXCLUDED.ingressos_vendidos,
+                                faturamento_bruto = EXCLUDED.faturamento_bruto,
+                                taxa_porcentagem = EXCLUDED.taxa_porcentagem,
+                                meta_ingressos = EXCLUDED.meta_ingressos
                         """,
                             (
                                 evento_selecionado,
@@ -748,7 +668,7 @@ def renderizar_gestao_eventos():
                         mes_nome = lista_meses[agora.month - 1]
                         desc_completa = f"Gasto {tag_evento}: {desc_c}"
 
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             "INSERT INTO custos_eventos (evento, item, valor, data, status) VALUES (?, ?, ?, ?, ?)",
@@ -798,7 +718,7 @@ def renderizar_gestao_eventos():
 
                     if col_t3.button("🗑️ Excluir", key=f"del_c_{row['id']}"):
                         desc_para_remover = f"Gasto {tag_evento}: {row['item']}"
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             "DELETE FROM custos_eventos WHERE id = ?",
@@ -832,7 +752,7 @@ def renderizar_gestao_eventos():
                         mes_nome = lista_meses[agora.month - 1]
                         desc_completa = f"Patrocínio {tag_evento}: {emp_p}"
 
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             "INSERT INTO patrocinios_eventos (evento, empresa, valor, data) VALUES (?, ?, ?, ?)",
@@ -869,7 +789,7 @@ def renderizar_gestao_eventos():
                     col_p2.write(f"R$ {row['valor']:.2f}")
                     if col_p3.button("🗑️ Excluir", key=f"del_p_{row['id']}"):
                         desc_para_remover = f"Patrocínio {tag_evento}: {row['empresa']}"
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             "DELETE FROM patrocinios_eventos WHERE id = ?",
