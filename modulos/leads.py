@@ -1,10 +1,9 @@
 import io
-import os
-import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import psycopg2
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -17,67 +16,14 @@ from reportlab.platypus import (
     TableStyle,
 )
 import streamlit as st
+from database.conexao_db import get_connection
 
-DB_PATH = "database/financeiro_v2.db"
 FUSO_BR = ZoneInfo("America/Sao_Paulo")
 
 
 def obter_agora_br():
     """Retorna o datetime atual no fuso horário de Brasília."""
     return datetime.now(FUSO_BR)
-
-
-def inicializar_banco_leads():
-    """Garante a existência da pasta e cria/atualiza a tabela no SQLite unificado."""
-    if not os.path.exists("database"):
-        os.makedirs("database")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS leads_vp_auditoria (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            empresa TEXT UNIQUE,
-            assessor TEXT,
-            valor_precificacao REAL,
-            comportamento_preco TEXT,
-            recorrencia_cliente TEXT,
-            stage_funil TEXT DEFAULT '🎯 Lead',
-            link_contrato TEXT,
-            link_termo_abertura TEXT,
-            link_termo_fechamento TEXT,
-            tipo_boleto TEXT,
-            link_boletos TEXT,
-            status_nota_fiscal TEXT,
-            data_auditoria TEXT,
-            obs_comercial TEXT,
-            obs_financeiro TEXT,
-            obs_juridico TEXT,
-            obs_licoes TEXT,
-            observacoes_vp TEXT
-        )
-    """)
-
-    cursor.execute("PRAGMA table_info(leads_vp_auditoria)")
-    cols_existentes = [col[1] for col in cursor.fetchall()]
-
-    novas_colunas = {
-        "stage_funil": "TEXT DEFAULT '🎯 Lead'",
-        "obs_comercial": "TEXT",
-        "obs_financeiro": "TEXT",
-        "obs_juridico": "TEXT",
-        "obs_licoes": "TEXT",
-    }
-
-    for col, def_type in novas_colunas.items():
-        if col not in cols_existentes:
-            cursor.execute(
-                f"ALTER TABLE leads_vp_auditoria ADD COLUMN {col} {def_type}"
-            )
-
-    conn.commit()
-    conn.close()
 
 
 def calcular_compliance_e_risco(row):
@@ -391,7 +337,6 @@ def gerar_dossie_executivo_pdf(row):
 
 def renderizar_modulo_leads():
     """Renderiza a Central de CRM, Compliance e Dossiês do Módulo de Auditoria."""
-    inicializar_banco_leads()
 
     st.markdown(
         "<h2 style='text-align: center; color: #C71585;'>🎯 CRM Executivo &"
@@ -403,7 +348,7 @@ def renderizar_modulo_leads():
         " documental e emissão de Dossiês Oficiais."
     )
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     df = pd.read_sql_query(
         "SELECT * FROM leads_vp_auditoria ORDER BY id DESC", conn
     )
@@ -554,7 +499,7 @@ def renderizar_modulo_leads():
                 type="primary",
                 use_container_width=True,
             ):
-                conn = sqlite3.connect(DB_PATH)
+                conn = get_connection()
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM leads_vp_auditoria WHERE id = ?", (id_del,))
                 conn.commit()
@@ -617,7 +562,7 @@ def renderizar_modulo_leads():
                 if emp and ass:
                     agora_d = obter_agora_br().strftime("%d/%m/%Y")
                     try:
-                        conn = sqlite3.connect(DB_PATH)
+                        conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             """
@@ -634,7 +579,7 @@ def renderizar_modulo_leads():
                         conn.close()
                         st.success(f"Dossiê do projeto {emp} aberto com sucesso!")
                         st.rerun()
-                    except sqlite3.IntegrityError:
+                    except psycopg2.IntegrityError:
                         st.error("Esta empresa já possui um Dossiê cadastrado no sistema.")
                 else:
                     st.error("Preencha ao menos o nome do cliente e o assessor.")
@@ -751,7 +696,7 @@ def renderizar_modulo_leads():
                 if st.form_submit_button(
                     "💾 Salvar Atualizações do Dossiê", use_container_width=True
                 ):
-                    conn = sqlite3.connect(DB_PATH)
+                    conn = get_connection()
                     cursor = conn.cursor()
                     cursor.execute(
                         """
