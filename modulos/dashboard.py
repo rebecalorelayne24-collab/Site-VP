@@ -1,40 +1,7 @@
-import os
-import sqlite3
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-
-# Banco de dados padronizado com o Fluxo de Caixa
-DB_PATH = "database/financeiro_v2.db"
-
-
-def garantir_tabela_existente():
-    """Garante a criação do banco e da tabela antes de qualquer leitura."""
-    if not os.path.exists("database"):
-        os.makedirs("database")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fluxo_caixa_geral (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mes TEXT,
-            data TEXT,
-            departamento TEXT,
-            tipo TEXT,
-            categoria TEXT,
-            descricao TEXT,
-            valor_bruto REAL,
-            taxa REAL,
-            valor_liquido REAL,
-            conta_origem TEXT,
-            status_pagamento TEXT,
-            nota_fiscal TEXT,
-            status_onvio TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+from database.conexao_db import get_connection
 
 
 def renderizar_dashboard_geral():
@@ -48,12 +15,9 @@ def renderizar_dashboard_geral():
         " diretoria."
     )
 
-    # 1. Garante a existência do banco/tabela antes da leitura
-    garantir_tabela_existente()
-
-    # 2. Carregamento Seguro dos Dados
+    # 1. Carregamento Seguro dos Dados
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_connection()
         df = pd.read_sql_query("SELECT * FROM fluxo_caixa_geral", conn)
         conn.close()
     except Exception as e:
