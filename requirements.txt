@@ -8,3 +8,4 @@ reportlab
 werkzeug
 xlsxwriter
 psycopg2-binary
+openpyxl
