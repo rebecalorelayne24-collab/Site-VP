@@ -45,14 +45,51 @@ def renderizar_totem():
             c_bx2.metric("📋 Total de Operações", f"{total_transacoes} vendas")
             st.markdown("---")
 
+            ids_selecionados_balcao = [
+                row["id"] for _, row in df_caixa_balcao.iterrows()
+                if st.session_state.get(f"chk_caixa_b_{row['id']}", False)
+            ]
+
+            col_bx_bulk1, col_bx_bulk2 = st.columns([3, 1])
+            with col_bx_bulk2:
+                if st.button(
+                    f"🗑️ Excluir Selecionados ({len(ids_selecionados_balcao)})",
+                    disabled=len(ids_selecionados_balcao) == 0,
+                    use_container_width=True,
+                    key="btn_excluir_lote_balcao",
+                ):
+                    st.session_state["confirmar_exclusao_lote_balcao"] = True
+
+            if st.session_state.get("confirmar_exclusao_lote_balcao", False) and ids_selecionados_balcao:
+                st.warning(f"⚠️ Tem certeza que deseja excluir **{len(ids_selecionados_balcao)}** lançamento(s) do balcão? Essa ação não pode ser desfeita.")
+                col_bx_conf1, col_bx_conf2 = st.columns(2)
+                with col_bx_conf1:
+                    if st.button("✅ Confirmar Exclusão", type="primary", key="confirmar_del_lote_balcao", use_container_width=True):
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        for id_lanc in ids_selecionados_balcao:
+                            cursor.execute("DELETE FROM caixa_balcao WHERE id = ?", (id_lanc,))
+                        conn.commit()
+                        conn.close()
+                        st.session_state["confirmar_exclusao_lote_balcao"] = False
+                        for id_lanc in ids_selecionados_balcao:
+                            st.session_state.pop(f"chk_caixa_b_{id_lanc}", None)
+                        st.success(f"{len(ids_selecionados_balcao)} lançamento(s) excluído(s) com sucesso!")
+                        st.rerun()
+                with col_bx_conf2:
+                    if st.button("❌ Cancelar", key="cancelar_del_lote_balcao", use_container_width=True):
+                        st.session_state["confirmar_exclusao_lote_balcao"] = False
+                        st.rerun()
+
             for idx, row in df_caixa_balcao.iterrows():
                 with st.container():
-                    col_b1, col_b2, col_b3, col_b4 = st.columns([2, 3, 2, 1])
+                    col_b0, col_b1, col_b2, col_b3, col_b4 = st.columns([0.4, 2, 3, 2, 1])
+                    col_b0.checkbox("Selecionar", key=f"chk_caixa_b_{row['id']}", label_visibility="collapsed")
                     col_b1.write(f"🕒 {row['data_hora']}")
                     col_b2.write(f"**{row['descricao']}**\n\n*Cliente:* {row['cliente']} | *Setor:* {row['diretoria']}")
                     col_b3.write(f"💸 **R$ {row['valor']:.2f}**\n\nStatus: {row['status_pagamento']}")
                     
-                    if col_b4.button("🗑️", key=f"del_caixa_b_{row['id']}", help="Excluir lançamento do balcão"):
+                    if col_b4.button("🗑️", key=f"del_caixa_b_{row['id']}", help="Excluir apenas este lançamento"):
                         conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM caixa_balcao WHERE id = ?", (row['id'],))
