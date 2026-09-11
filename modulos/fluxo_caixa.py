@@ -659,9 +659,48 @@ def renderizar_aba_fluxo_caixa():
         )
 
         st.markdown(f"#### 📄 Lançamentos Encontrados ({len(df_filtrado)} registros)")
+
+        ids_selecionados = [
+            row["id"] for _, row in df_filtrado.iterrows()
+            if st.session_state.get(f"chk_fluxo_{row['id']}", False)
+        ]
+
+        col_bulk1, col_bulk2 = st.columns([3, 1])
+        with col_bulk2:
+            if st.button(
+                f"🗑️ Excluir Selecionados ({len(ids_selecionados)})",
+                disabled=len(ids_selecionados) == 0,
+                use_container_width=True,
+            ):
+                st.session_state["confirmar_exclusao_lote_fluxo"] = True
+
+        if st.session_state.get("confirmar_exclusao_lote_fluxo", False) and ids_selecionados:
+            st.warning(f"⚠️ Tem certeza que deseja excluir **{len(ids_selecionados)}** lançamento(s)? Essa ação não pode ser desfeita.")
+            col_conf1, col_conf2 = st.columns(2)
+            with col_conf1:
+                if st.button("✅ Confirmar Exclusão", type="primary", key="confirmar_del_lote_fluxo", use_container_width=True):
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    for id_lanc in ids_selecionados:
+                        cursor.execute("DELETE FROM fluxo_caixa_geral WHERE id = ?", (id_lanc,))
+                    conn.commit()
+                    conn.close()
+                    st.session_state["confirmar_exclusao_lote_fluxo"] = False
+                    for id_lanc in ids_selecionados:
+                        st.session_state.pop(f"chk_fluxo_{id_lanc}", None)
+                    st.success(f"{len(ids_selecionados)} lançamento(s) excluído(s) com sucesso!")
+                    st.rerun()
+            with col_conf2:
+                if st.button("❌ Cancelar", key="cancelar_del_lote_fluxo", use_container_width=True):
+                    st.session_state["confirmar_exclusao_lote_fluxo"] = False
+                    st.rerun()
+
         for idx, row in df_filtrado.iterrows():
             with st.container():
-                col_l1, col_l2, col_l3, col_l4 = st.columns([1, 4, 2, 1])
+                col_l0, col_l1, col_l2, col_l3, col_l4 = st.columns([0.4, 1, 4, 2, 1])
+
+                col_l0.checkbox("Selecionar", key=f"chk_fluxo_{row['id']}", label_visibility="collapsed")
+
                 cor_tipo = "#E8F5E9" if row["tipo"] == "Receita" else "#FFEBEE"
                 txt_tipo_cor = "#2E7D32" if row["tipo"] == "Receita" else "#C62828"
 
@@ -680,7 +719,7 @@ def renderizar_aba_fluxo_caixa():
                 col_l3.write(f"💸 **Líq:** R$ {row['valor_liquido']:.2f}")
                 col_l3.caption(f"Status: {row['status_pagamento']} | NF: {row['nota_fiscal']}")
 
-                if col_l4.button("🗑️", key=f"del_fluxo_{row['id']}", help="Excluir lançamento"):
+                if col_l4.button("🗑️", key=f"del_fluxo_{row['id']}", help="Excluir apenas este lançamento"):
                     conn = get_connection()
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM fluxo_caixa_geral WHERE id = ?", (row["id"],))
