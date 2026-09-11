@@ -78,13 +78,25 @@ def renderizar_totem():
                 else:
                     df_vendas = pd.read_excel(arquivo_offline)
 
+                # Normaliza os nomes das colunas (remove acentos, maiúsculas e
+                # espaços extras) para aceitar tanto o formato interno quanto
+                # o formato exportado pelo app offline do totem
+                # (ex.: "Descrição" -> "descricao", "Valor" -> "valor").
+                import unicodedata
+
+                def _normalizar_coluna(nome):
+                    nome = str(nome).strip().lower()
+                    nome = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("ascii")
+                    return nome
+
+                df_vendas.columns = [_normalizar_coluna(c) for c in df_vendas.columns]
+
                 st.markdown(f"#### 🔎 Prévia das Transações ({len(df_vendas)} registros)")
                 st.dataframe(df_vendas, use_container_width=True)
 
                 if st.button("🚀 Processar e Sincronizar Tudo no Sistema", type="primary", use_container_width=True):
                     qtd_sucesso = 0
                     hoje = datetime.now()
-                    mes_atual = lista_meses[hoje.month - 1]
                     data_str = hoje.strftime("%Y-%m-%d")
 
                     conn = get_connection()
@@ -92,16 +104,41 @@ def renderizar_totem():
 
                     for _, line in df_vendas.iterrows():
                         categoria = str(line.get("categoria", "Serviço Prestado")).strip()
-                        tipo_item = str(line.get("tipo", "Geral")).strip().lower()
+                        # O app offline do totem não exporta uma coluna "tipo"
+                        # separada — usamos a própria "categoria" (ex.: "sude",
+                        # "acai") para identificar o tipo de produto vendido.
+                        tipo_item = categoria.lower()
                         descricao = str(line.get("descricao", "Venda de Balcão")).strip()
-                        valor = float(line.get("valor", 0.0))
+                        valor_bruto = str(line.get("valor", 0.0)).strip().replace(",", ".")
+                        try:
+                            valor = float(valor_bruto)
+                        except ValueError:
+                            valor = 0.0
                         depto = str(line.get("diretoria", "VP")).strip()
                         cliente = str(line.get("cliente", "Cliente Balcão")).strip()
-                        horario_reg = str(line.get("horario", hoje.strftime("%H:%M:%S"))).strip()
-                        dt_hora_completa = f"{data_str} {horario_reg}"
+
+                        # Usa a data real da venda (coluna "data" do totem),
+                        # com fallback para a data de hoje se não vier no arquivo.
+                        data_venda_bruta = str(line.get("data", "")).strip()
+                        if data_venda_bruta:
+                            try:
+                                dt_venda = pd.to_datetime(data_venda_bruta)
+                                data_str_linha = dt_venda.strftime("%Y-%m-%d")
+                                hora_venda = dt_venda.strftime("%H:%M:%S")
+                                horario_reg = hora_venda if hora_venda != "00:00:00" else hoje.strftime("%H:%M:%S")
+                            except Exception:
+                                data_str_linha = data_str
+                                horario_reg = str(line.get("horario", hoje.strftime("%H:%M:%S"))).strip()
+                        else:
+                            data_str_linha = data_str
+                            horario_reg = str(line.get("horario", hoje.strftime("%H:%M:%S"))).strip()
+
+                        mes_atual = lista_meses[int(data_str_linha[5:7]) - 1]
+
+                        dt_hora_completa = f"{data_str_linha} {horario_reg}"
 
                         if valor > 0:
-                            is_dda = any(k in tipo_item or k in descricao.lower() for k in ["açaí", "acai", "sundae", "dda"])
+                            is_dda = any(k in tipo_item or k in descricao.lower() for k in ["açaí", "acai", "sundae", "sude", "dda"])
                             is_souvenir = any(k in tipo_item or k in descricao.lower() for k in ["souvenir", "caneca", "camisa", "tirante", "brinde", "chaveiro"])
                             is_impressao = any(k in tipo_item or k in descricao.lower() for k in ["impressao", "impressão", "xerox", "copia", "cópia", "folha"])
                             is_jaleco = "jaleco" in tipo_item or "jaleco" in descricao.lower()
