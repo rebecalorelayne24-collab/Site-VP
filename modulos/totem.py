@@ -418,5 +418,4 @@ def renderizar_totem():
                     'diretoria': 'Diretoria Meta'
                 })[['Data / Hora', 'Cliente', 'Páginas', 'Valor Total (R$)', 'Diretoria Meta']],
                 use_container_width=True
-             )
             )
