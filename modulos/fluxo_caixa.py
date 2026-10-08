@@ -31,20 +31,35 @@ def obter_lista_bancos(df):
 
 
 def salvar_lancamento(
-    mes, data, depto, tipo, cat, desc, v_bruto, v_taxa, v_liq, conta, pagamento, nf, onvio
+    mes, data, depto, tipo, cat, desc, v_bruto, v_taxa, v_liq, conta, pagamento, nf, onvio,
+    id_origem_balcao=None,
 ):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO fluxo_caixa_geral (
-            mes, data, departamento, tipo, categoria, descricao, 
-            valor_bruto, taxa, valor_liquido, conta_origem, 
-            status_pagamento, nota_fiscal, status_onvio
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """,
-        (mes, data, depto, tipo, cat, desc, v_bruto, v_taxa, v_liq, conta, pagamento, nf, onvio),
-    )
+    if id_origem_balcao is None:
+        cursor.execute(
+            """
+            INSERT INTO fluxo_caixa_geral (
+                mes, data, departamento, tipo, categoria, descricao, 
+                valor_bruto, taxa, valor_liquido, conta_origem, 
+                status_pagamento, nota_fiscal, status_onvio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (mes, data, depto, tipo, cat, desc, v_bruto, v_taxa, v_liq, conta, pagamento, nf, onvio),
+        )
+    else:
+        # Lançamento vindo do Totem: guarda o vínculo com o caixa do balcão
+        # para que, ao cancelar lá, o Fluxo de Caixa também seja atualizado.
+        cursor.execute(
+            """
+            INSERT INTO fluxo_caixa_geral (
+                mes, data, departamento, tipo, categoria, descricao, 
+                valor_bruto, taxa, valor_liquido, conta_origem, 
+                status_pagamento, nota_fiscal, status_onvio, id_origem_balcao
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (mes, data, depto, tipo, cat, desc, v_bruto, v_taxa, v_liq, conta, pagamento, nf, onvio, id_origem_balcao),
+        )
     conn.commit()
     conn.close()
 
@@ -80,12 +95,33 @@ def salvar_lancamentos_em_lote(lista_lancamentos):
     conn.close()
 
 
+def _modelos_gemini_disponiveis():
+    """Lista os modelos 'flash' que a sua chave realmente enxerga (os nomes mudam com o tempo)."""
+    preferidos = []
+    try:
+        for m in genai.list_models():
+            if "generateContent" in getattr(m, "supported_generation_methods", []):
+                nome = m.name.replace("models/", "")
+                if "flash" in nome and "preview" not in nome and "exp" not in nome:
+                    preferidos.append(nome)
+    except Exception:
+        pass
+    # Mais leves/rápidos primeiro
+    preferidos.sort(key=lambda n: (("lite" not in n), n))
+    fallback = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"]
+    return preferidos + [m for m in fallback if m not in preferidos]
+
+
 def ler_extrato_com_gemini(texto_pdf):
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if api_key:
         api_key = str(api_key).strip().strip('"').strip("'")
 
-    if not api_key or not texto_pdf or len(texto_pdf.strip()) < 10:
+    if not api_key:
+        st.error("Chave GEMINI_API_KEY não encontrada nos Secrets do Streamlit.")
+        return []
+    if not texto_pdf or len(texto_pdf.strip()) < 10:
+        st.error("Não consegui extrair texto desse PDF (pode ser um PDF escaneado/imagem).")
         return []
 
     try:
@@ -107,21 +143,23 @@ def ler_extrato_com_gemini(texto_pdf):
         {texto_pdf}
         """
 
-        modelos_rapidos = ["gemini-1.5-flash-8b", "gemini-2.0-flash", "gemini-flash-latest"]
         generation_config = genai.types.GenerationConfig(temperature=0.0)
 
         resposta_texto = None
-        for m in modelos_rapidos:
+        ultimo_erro = None
+        for m in _modelos_gemini_disponiveis():
             try:
                 model = genai.GenerativeModel(m)
                 res = model.generate_content(prompt, generation_config=generation_config)
                 if res and res.text:
                     resposta_texto = res.text.strip()
                     break
-            except Exception:
+            except Exception as e:
+                ultimo_erro = f"{m}: {e}"
                 continue
 
         if not resposta_texto:
+            st.error(f"A IA não respondeu. Último erro: {ultimo_erro}")
             return []
 
         if "```" in resposta_texto:
@@ -541,7 +579,11 @@ def renderizar_aba_fluxo_caixa():
                     texto_bruto = ""
 
             if texto_bruto:
-                lancamentos_ia = ler_extrato_com_gemini(texto_bruto)
+                chave_cache_pdf = f"ia_pdf_{arquivo_pdf.name}_{arquivo_pdf.size}"
+                if chave_cache_pdf not in st.session_state:
+                    with st.spinner("🤖 A IA está lendo o extrato..."):
+                        st.session_state[chave_cache_pdf] = ler_extrato_com_gemini(texto_bruto)
+                lancamentos_ia = st.session_state[chave_cache_pdf]
 
                 if lancamentos_ia:
                     st.write(f"📋 **{len(lancamentos_ia)} lançamentos mapeados:**")
@@ -729,4 +771,5 @@ def renderizar_aba_fluxo_caixa():
                     st.rerun()
             st.markdown("<hr style='margin: 4px 0; border: 0.5px solid #F8F8F8;'>", unsafe_allow_html=True)
     else:
+        st.info("A tabela de fluxo de caixa está limpa no momento.")
         st.info("A tabela de fluxo de caixa está limpa no momento.")
