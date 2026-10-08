@@ -5,6 +5,54 @@ from datetime import datetime
 from modulos.fluxo_caixa import salvar_lancamento
 from database.conexao_db import get_connection
 
+def _excluir_venda_balcao(cursor, id_balcao):
+    """Cancela uma venda do balcão e remove também o lançamento correspondente
+    no Fluxo de Caixa Geral e no histórico (DDA / Souvenirs / Impressões)."""
+    cursor.execute("SELECT data_hora, tipo_servico, descricao, cliente, valor FROM caixa_balcao WHERE id = ?", (id_balcao,))
+    r = cursor.fetchone()
+
+    # 1) Fluxo de Caixa Geral — pelo vínculo exato (lançamentos novos)
+    cursor.execute("DELETE FROM fluxo_caixa_geral WHERE id_origem_balcao = ?", (id_balcao,))
+    removidos = cursor.rowcount
+
+    if r:
+        data_hora, tipo_servico, descricao, cliente, valor = r
+
+        # 1b) Lançamentos antigos (sem vínculo): tenta achar o par pelo valor + descrição
+        if removidos == 0:
+            cursor.execute(
+                """DELETE FROM fluxo_caixa_geral WHERE id = (
+                       SELECT id FROM fluxo_caixa_geral
+                       WHERE id_origem_balcao IS NULL AND tipo = 'Receita'
+                         AND ABS(valor_bruto - ?) < 0.005 AND descricao LIKE ?
+                       ORDER BY id DESC LIMIT 1)""",
+                (valor, "%" + str(descricao) + "%"),
+            )
+
+        # 2) Histórico específico (DDA / Souvenirs / Impressões)
+        if tipo_servico == "DDA (Açaí/Sundae)":
+            cursor.execute(
+                """DELETE FROM vendas_dda WHERE id = (SELECT id FROM vendas_dda
+                   WHERE data_hora = ? AND produto = ? AND ABS(valor - ?) < 0.005 ORDER BY id DESC LIMIT 1)""",
+                (data_hora, descricao, valor),
+            )
+        elif tipo_servico == "Souvenir":
+            cursor.execute(
+                """DELETE FROM vendas_souvenirs WHERE id = (SELECT id FROM vendas_souvenirs
+                   WHERE data_hora = ? AND item = ? AND ABS(valor - ?) < 0.005 ORDER BY id DESC LIMIT 1)""",
+                (data_hora, descricao, valor),
+            )
+        elif tipo_servico == "Impressão/Xerox":
+            cursor.execute(
+                """DELETE FROM registro_impressoes WHERE id = (SELECT id FROM registro_impressoes
+                   WHERE data_hora = ? AND cliente_nome = ? AND ABS(valor - ?) < 0.005 ORDER BY id DESC LIMIT 1)""",
+                (data_hora, cliente, valor),
+            )
+
+    # 3) Por fim, o próprio lançamento do balcão
+    cursor.execute("DELETE FROM caixa_balcao WHERE id = ?", (id_balcao,))
+
+
 def renderizar_totem():
     st.markdown("<h2 style='text-align: center; color: #FF1493;'>🍦 Central de Sincronização & Caixa do Balcão</h2>", unsafe_allow_html=True)
     st.caption("Gerenciamento isolado das receitas de balcão (Açaí, Jalecos, Souvenirs e Impressões) e sincronização com o sistema geral.")
@@ -68,7 +116,7 @@ def renderizar_totem():
                         conn = get_connection()
                         cursor = conn.cursor()
                         for id_lanc in ids_selecionados_balcao:
-                            cursor.execute("DELETE FROM caixa_balcao WHERE id = ?", (id_lanc,))
+                            _excluir_venda_balcao(cursor, id_lanc)
                         conn.commit()
                         conn.close()
                         st.session_state["confirmar_exclusao_lote_balcao"] = False
@@ -92,10 +140,10 @@ def renderizar_totem():
                     if col_b4.button("🗑️", key=f"del_caixa_b_{row['id']}", help="Excluir apenas este lançamento"):
                         conn = get_connection()
                         cursor = conn.cursor()
-                        cursor.execute("DELETE FROM caixa_balcao WHERE id = ?", (row['id'],))
+                        _excluir_venda_balcao(cursor, row['id'])
                         conn.commit()
                         conn.close()
-                        st.success("Lançamento estornado com sucesso!")
+                        st.success("Venda cancelada no Caixa do Balcão e no Fluxo de Caixa!")
                         st.rerun()
                 st.markdown("<hr style='margin: 4px 0; border: 0.5px solid #F0F0F0;'>", unsafe_allow_html=True)
 
@@ -212,16 +260,18 @@ def renderizar_totem():
 
                             # 1. Salva no Caixa Próprio do Balcão
                             cursor.execute(
-                                "INSERT INTO caixa_balcao (data_hora, tipo_servico, descricao, cliente, valor, diretoria, status_pagamento) VALUES (?, ?, ?, ?, ?, ?, '🟢 Pago')",
+                                "INSERT INTO caixa_balcao (data_hora, tipo_servico, descricao, cliente, valor, diretoria, status_pagamento) VALUES (?, ?, ?, ?, ?, ?, '🟢 Pago') RETURNING id",
                                 (dt_hora_completa, tipo_servico_balcao, descricao, cliente, valor, depto)
                             )
+                            id_balcao_novo = cursor.fetchone()[0]
 
-                            # 2. Salva no Fluxo de Caixa Geral oficial da EJ
+                            # 2. Salva no Fluxo de Caixa Geral oficial da EJ (vinculado ao balcão)
                             salvar_lancamento(
-                                mes_atual, data_str, depto, "Receita", 
+                                mes_atual, data_str_linha, depto, "Receita", 
                                 cat_fluxo, desc_final, 
                                 valor, valor * 0.0199, valor * 0.9801, 
-                                "PicPay", "🟢 Pago", "⚪ Não se aplica", "❌ Não enviado"
+                                "PicPay", "🟢 Pago", "⚪ Não se aplica", "❌ Não enviado",
+                                id_origem_balcao=id_balcao_novo,
                             )
 
                             # 3. Se for aluguel de Jaleco, registra no controle de empréstimos
@@ -368,4 +418,5 @@ def renderizar_totem():
                     'diretoria': 'Diretoria Meta'
                 })[['Data / Hora', 'Cliente', 'Páginas', 'Valor Total (R$)', 'Diretoria Meta']],
                 use_container_width=True
+             )
             )
