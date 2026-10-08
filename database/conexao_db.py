@@ -121,6 +121,6 @@ def get_connection():
         if _conexao_viva(conn):
             return _CompatConnection(conn, pool)
         pool.putconn(conn, close=True)
-     return _CompatConnection(pool.getconn(), pool)
-
+    return _CompatConnection(pool.getconn(), pool)
+ 
     return _CompatConnection(pool.getconn(), pool)
